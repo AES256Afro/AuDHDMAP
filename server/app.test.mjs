@@ -61,6 +61,21 @@ describe("AuDHDMAP API", () => {
     expect(await response.json()).toEqual({ error: "The username or password is not correct." });
   });
 
+  it("authenticates before parsing large-route JSON and keeps login bodies small", async () => {
+    const { base } = await setup();
+    const unauthorizedMalformed = await fetch(`${base}/api/workspace`, { method: "PUT", headers: { "content-type": "application/json", "x-audhdmap-request": "1" }, body: "{" });
+    expect(unauthorizedMalformed.status).toBe(401);
+    expect(await unauthorizedMalformed.json()).toEqual({ error: "Sign in to continue." });
+
+    const malformedLogin = await fetch(`${base}/api/auth/login`, { method: "POST", headers: { "content-type": "application/json", "x-audhdmap-request": "1" }, body: "{" });
+    expect(malformedLogin.status).toBe(400);
+    expect(await malformedLogin.json()).toEqual({ error: "The request does not contain valid JSON." });
+
+    const oversizedLogin = await fetch(`${base}/api/auth/login`, { method: "POST", headers: { "content-type": "application/json", "x-audhdmap-request": "1" }, body: JSON.stringify({ username: "owner", password: "x".repeat(70 * 1024) }) });
+    expect(oversizedLogin.status).toBe(413);
+    expect(await oversizedLogin.json()).toEqual({ error: "The request is larger than this server accepts." });
+  });
+
   it("temporarily blocks repeated login failures", async () => {
     const { base } = await setup();
     for (let attempt = 0; attempt < 6; attempt += 1) expect((await signIn(base, `wrong-${attempt}`)).response.status).toBe(401);
@@ -91,6 +106,15 @@ describe("AuDHDMAP API", () => {
     const stale = await fetch(`${base}/api/workspace`, { method: "PUT", headers: { cookie, "content-type": "application/json", "x-audhdmap-request": "1" }, body: JSON.stringify({ workspace, expectedRevision: 0 }) });
     expect(stale.status).toBe(409);
     expect((await stale.json()).error).toMatch(/another session/i);
+  });
+
+  it("accepts an authenticated workspace body larger than the small-route ceiling", async () => {
+    const { base } = await setup(); const { cookie } = await signIn(base);
+    const workspace = await (await fetch(`${base}/api/workspace`, { headers: { cookie } })).json();
+    workspace.nodes[0].note = "x".repeat(70 * 1024);
+    const saved = await fetch(`${base}/api/workspace`, { method: "PUT", headers: { cookie, "content-type": "application/json", "x-audhdmap-request": "1" }, body: JSON.stringify({ workspace, expectedRevision: 0 }) });
+    expect(saved.status).toBe(200);
+    expect((await saved.json()).nodes[0].note).toHaveLength(70 * 1024);
   });
 
   it("creates, lists, and revision-checks server-local recovery points", async () => {

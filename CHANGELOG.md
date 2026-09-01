@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.1
+
+- Authenticate workspace and JSON-import requests before parsing their bodies, preventing anonymous clients from consuming the 8 MiB large-workspace parser allowance.
+- Give login and small recovery mutations a separate 64 KiB JSON ceiling while retaining 8 MiB for supported large-workspace save and import paths.
+- Return bounded JSON errors for malformed and oversized request bodies, with regression coverage for parser order and a workspace payload above the small-route ceiling.
+
 ## 0.6.0
 
 - Add current-map and focused-branch project CSV export with stable IDs, hierarchy paths, task fields, tags, notes, web links, attachment metadata, and labeled incoming or outgoing references.

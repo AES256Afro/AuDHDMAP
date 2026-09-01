@@ -110,6 +110,8 @@ export function createApp({
   const app = express();
   const sessions = createSessions(sessionSecret, { now });
   const failures = new Map();
+  const smallJson = express.json({ limit: "64kb" });
+  const workspaceJson = express.json({ limit: "8mb" });
   app.disable("x-powered-by");
   app.set("trust proxy", trustProxy);
 
@@ -124,8 +126,6 @@ export function createApp({
     if (request.secure) response.setHeader("Strict-Transport-Security", "max-age=31536000");
     next();
   });
-  app.use(express.json({ limit: "8mb" }));
-
   function requireApplicationRequest(request, response, next) {
     if (["GET", "HEAD", "OPTIONS"].includes(request.method) || request.get("x-audhdmap-request") === "1") return next();
     response.status(403).json({ error: "The application request header is missing." });
@@ -158,7 +158,7 @@ export function createApp({
     response.json({ authenticated: Boolean(session), username: session?.username ?? null });
   });
 
-  app.post("/api/auth/login", (request, response) => {
+  app.post("/api/auth/login", smallJson, (request, response) => {
     const key = request.ip || "unknown";
     const cutoff = now() - 15 * 60_000;
     for (const [address, value] of failures) if (value.lastAttempt < cutoff && value.blockedUntil < now()) failures.delete(address);
@@ -195,7 +195,7 @@ export function createApp({
     response.json(await store.read());
   });
 
-  app.put("/api/workspace", requireAuth, async (request, response) => {
+  app.put("/api/workspace", requireAuth, workspaceJson, async (request, response) => {
     const expectedRevision = Number(request.body?.expectedRevision);
     try {
       const next = await store.replace(request.body?.workspace, expectedRevision);
@@ -211,7 +211,7 @@ export function createApp({
     response.json(await store.listSnapshots());
   });
 
-  app.post("/api/snapshots", requireAuth, async (request, response) => {
+  app.post("/api/snapshots", requireAuth, smallJson, async (request, response) => {
     const expectedRevision = Number(request.body?.expectedRevision);
     try {
       response.setHeader("Cache-Control", "private, no-store");
@@ -223,7 +223,7 @@ export function createApp({
     }
   });
 
-  app.post("/api/snapshots/:id/restore", requireAuth, async (request, response) => {
+  app.post("/api/snapshots/:id/restore", requireAuth, smallJson, async (request, response) => {
     const expectedRevision = Number(request.body?.expectedRevision);
     try {
       response.setHeader("Cache-Control", "private, no-store");
@@ -299,7 +299,7 @@ export function createApp({
     } catch (error) { next(error); }
   });
 
-  app.post("/api/import/preview", requireAuth, async (request, response) => {
+  app.post("/api/import/preview", requireAuth, workspaceJson, async (request, response) => {
     const expectedRevision = Number(request.body?.expectedRevision);
     const candidate = request.body?.workspace?.workspace ?? request.body?.workspace;
     try {
@@ -311,7 +311,7 @@ export function createApp({
     }
   });
 
-  app.post("/api/import", requireAuth, async (request, response) => {
+  app.post("/api/import", requireAuth, workspaceJson, async (request, response) => {
     const expectedRevision = Number(request.body?.expectedRevision);
     const candidate = request.body?.workspace?.workspace ?? request.body?.workspace;
     try { response.json(await store.replaceImported(candidate, expectedRevision, request.body?.confirmation)); }
@@ -374,7 +374,7 @@ export function createApp({
     }
   });
 
-  app.delete("/api/attachments/:id", requireAuth, async (request, response) => {
+  app.delete("/api/attachments/:id", requireAuth, workspaceJson, async (request, response) => {
     if (!safeAttachmentId(request.params.id)) return response.status(400).json({ error: "Invalid attachment id." });
     const expectedRevision = Number(request.body?.expectedRevision);
     try {
@@ -386,7 +386,7 @@ export function createApp({
     }
   });
 
-  app.delete("/api/trash/:id", requireAuth, async (request, response) => {
+  app.delete("/api/trash/:id", requireAuth, workspaceJson, async (request, response) => {
     if (!safeRecordId(request.params.id)) return response.status(400).json({ error: "Invalid thought id." });
     const expectedRevision = Number(request.body?.expectedRevision);
     try {
@@ -408,6 +408,7 @@ export function createApp({
   app.use((error, _request, response, _next) => {
     if (response.headersSent) { response.destroy(); return; }
     if (error?.type === "entity.too.large") return response.status(413).json({ error: "The request is larger than this server accepts." });
+    if (error?.type === "entity.parse.failed") return response.status(400).json({ error: "The request does not contain valid JSON." });
     console.error(error);
     response.status(500).json({ error: "AuDHDMAP could not complete that request." });
   });

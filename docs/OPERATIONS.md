@@ -125,7 +125,7 @@ docker compose ps
 
 Avoid relying on the moving `edge` tag for a controlled installation. Use the catalog's versioned image.
 
-## Limits in 0.6.0
+## Limits in 0.6.1
 
 - 200 maps
 - 10,000 thoughts
@@ -135,7 +135,7 @@ Avoid relying on the moving `edge` tag for a controlled installation. Use the ca
 - 64 categories
 - 100 attachments and 100 web links per thought
 - 25 MiB per attachment
-- 8 MiB JSON API payload
+- 8 MiB workspace/import JSON payload; 64 KiB for login and small mutations
 - 512 MiB compressed backup upload
 - 2 GiB expanded backup and 20,010 ZIP entries
 - 10 valid server recovery points
