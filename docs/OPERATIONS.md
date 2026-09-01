@@ -125,7 +125,7 @@ docker compose ps
 
 Avoid relying on the moving `edge` tag for a controlled installation. Use the catalog's versioned image.
 
-## Limits in 0.6.4
+## Limits in 0.6.5
 
 - 200 maps
 - 10,000 thoughts

@@ -256,6 +256,7 @@ describe("AuDHDMAP API", () => {
     workspace.nodes[0].trashedAt = "2026-09-01T12:30:00.000Z";
     await store.replace(workspace, 0);
     const response = await fetch(`${base}/api/export`, { headers: { cookie } });
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
     const exported = await response.json();
     expect(exported.workspace.nodes.some((node) => node.id === workspace.nodes[0].id)).toBe(false);
     expect(exported.workspace.edges.some((edge) => edge.source === workspace.nodes[0].id || edge.target === workspace.nodes[0].id)).toBe(false);

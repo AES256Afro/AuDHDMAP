@@ -251,6 +251,7 @@ export function createApp({
     const workspace = await store.read();
     const exportedWorkspace = ordinaryExportWorkspace(workspace);
     response.setHeader("Content-Type", "application/json; charset=utf-8");
+    response.setHeader("Cache-Control", "private, no-store");
     response.setHeader("Content-Disposition", `attachment; filename="audhdmap-export-r${workspace.revision}.json"`);
     response.send(`${JSON.stringify({ exportedAt: new Date(now()).toISOString(), application: "AuDHDMAP", workspace: exportedWorkspace }, null, 2)}\n`);
   });

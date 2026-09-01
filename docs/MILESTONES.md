@@ -69,7 +69,7 @@ Acceptance criteria:
 - Import confirmation is bound to the exact previewed payload and current revision. The server validates both again and requires a recovery point before replacement.
 - Checked-in JSON and CSV fixtures, API tests, UI tests, and the supported-limit benchmark cover compatibility and the full preview-confirm path.
 
-## 0.6.1 through 0.6.4 - Hardened daily interaction
+## 0.6.1 through 0.6.5 - Hardened daily interaction
 
 Status: shipped
 
@@ -78,6 +78,7 @@ Status: shipped
 - Every modal dialog contains forward and reverse keyboard focus within the active panel and returns focus to its launching control when it closes.
 - Malformed cookie encoding fails closed, public health failures hide internal error details, and Unicode attachment names survive safe request and download headers.
 - Existing workspace access failures stop startup without replacing stored data; only a truly absent file receives the initial seed workspace.
+- Every authenticated workspace and export response, including the data-only JSON download, prevents shared or browser cache retention.
 - API and interaction regression tests cover parser order, both body ceilings, malformed JSON and cookies, bounded health failures, Unicode filenames, fail-closed startup, focus containment, and focus restoration.
 
 ## Later gates

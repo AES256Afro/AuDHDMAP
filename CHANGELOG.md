@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.5
+
+- Mark the authenticated data-only JSON export `private, no-store`, matching every other workspace and export response so shared caches cannot retain private workspace content.
+- Add a direct API regression for the JSON export cache policy.
+
 ## 0.6.4
 
 - Create the seed workspace only when `workspace.json` is truly absent.
