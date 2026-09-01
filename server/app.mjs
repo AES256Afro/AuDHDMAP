@@ -52,6 +52,8 @@ function safeAttachmentId(value) {
   return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,95}$/.test(value);
 }
 
+const safeRecordId = safeAttachmentId;
+
 function verifiedImageMime(buffer, claimedMime) {
   const png = buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
   const jpeg = buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
@@ -59,6 +61,17 @@ function verifiedImageMime(buffer, claimedMime) {
   const webp = buffer.length >= 12 && buffer.subarray(0, 4).toString("ascii") === "RIFF" && buffer.subarray(8, 12).toString("ascii") === "WEBP";
   const avif = buffer.length >= 12 && buffer.subarray(4, 8).toString("ascii") === "ftyp" && ["avif", "avis"].includes(buffer.subarray(8, 12).toString("ascii"));
   return ({ "image/png": png, "image/jpeg": jpeg, "image/gif": gif, "image/webp": webp, "image/avif": avif })[claimedMime] ? claimedMime : "application/octet-stream";
+}
+
+function ordinaryExportWorkspace(workspace) {
+  const activeNodes = workspace.nodes.filter((node) => !node.trashedAt);
+  const nodeIds = new Set(activeNodes.map((node) => node.id));
+  const nodes = activeNodes.map((node) => node.parentId && !nodeIds.has(node.parentId) ? { ...node, parentId: null } : node);
+  return {
+    ...workspace,
+    nodes,
+    edges: workspace.edges.filter((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target)),
+  };
 }
 
 async function receiveRequestFile(request, targetPath, maximumBytes) {
@@ -195,9 +208,10 @@ export function createApp({
 
   app.get("/api/export", requireAuth, async (_request, response) => {
     const workspace = await store.read();
+    const exportedWorkspace = ordinaryExportWorkspace(workspace);
     response.setHeader("Content-Type", "application/json; charset=utf-8");
     response.setHeader("Content-Disposition", `attachment; filename="audhdmap-export-r${workspace.revision}.json"`);
-    response.send(`${JSON.stringify({ exportedAt: new Date(now()).toISOString(), application: "AuDHDMAP", workspace }, null, 2)}\n`);
+    response.send(`${JSON.stringify({ exportedAt: new Date(now()).toISOString(), application: "AuDHDMAP", workspace: exportedWorkspace }, null, 2)}\n`);
   });
 
   app.get("/api/export/backup.zip", requireAuth, async (_request, response, next) => {
@@ -222,7 +236,7 @@ export function createApp({
       const focusId = typeof request.query.focusId === "string" ? request.query.focusId : null;
       const map = workspace.maps.find((entry) => entry.id === mapId);
       if (!map) return response.status(400).json({ error: "Choose a map before exporting." });
-      const focus = focusId ? workspace.nodes.find((node) => node.id === focusId && node.mapId === mapId) : null;
+      const focus = focusId ? workspace.nodes.find((node) => node.id === focusId && node.mapId === mapId && !node.trashedAt) : null;
       const slug = safeExportSlug(focus ? `${map.title}-${focus.title}` : map.title);
       response.setHeader("Cache-Control", "private, no-store");
       if (request.params.format === "pdf") {
@@ -320,6 +334,18 @@ export function createApp({
     } catch (error) {
       if (error.code === "REVISION_CONFLICT") return response.status(409).json({ error: error.message, workspace: error.current });
       if (error.code === "ATTACHMENT_NOT_FOUND") return response.status(404).json({ error: error.message });
+      response.status(400).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/trash/:id", requireAuth, async (request, response) => {
+    if (!safeRecordId(request.params.id)) return response.status(400).json({ error: "Invalid thought id." });
+    const expectedRevision = Number(request.body?.expectedRevision);
+    try {
+      response.json(await store.purgeTrashedNode(request.body?.workspace, request.params.id, expectedRevision));
+    } catch (error) {
+      if (error.code === "REVISION_CONFLICT") return response.status(409).json({ error: error.message, workspace: error.current });
+      if (error.code === "NODE_NOT_FOUND" || error.code === "NODE_NOT_TRASHED") return response.status(404).json({ error: error.message });
       response.status(400).json({ error: error.message });
     }
   });

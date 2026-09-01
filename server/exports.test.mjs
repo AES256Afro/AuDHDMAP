@@ -22,6 +22,15 @@ describe("workspace exports", () => {
     expect(text).not.toContain("**");
   });
 
+  it("keeps trashed thoughts and their descendants out of ordinary exports", () => {
+    const workspace = defaultWorkspace(new Date("2026-09-01T12:00:00.000Z"));
+    workspace.nodes.find((node) => node.id === "node-storage").trashedAt = "2026-09-01T13:00:00.000Z";
+    const selection = exportSelection(workspace, "map-home-server");
+    expect(selection.nodes.map((node) => node.id)).not.toContain("node-storage");
+    expect(selection.nodes.map((node) => node.id)).toContain("node-backups");
+    expect(renderMapMarkdown(workspace, "map-home-server")).not.toContain("**Storage plan**");
+  });
+
   it("creates a self-contained SVG without executable content", () => {
     const workspace = defaultWorkspace(new Date("2026-09-01T12:00:00.000Z"));
     workspace.nodes[0].title = "Plan <script>alert(1)</script>";

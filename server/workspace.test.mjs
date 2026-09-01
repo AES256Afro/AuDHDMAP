@@ -25,6 +25,18 @@ describe("workspace normalization", () => {
     expect(clean.settings.brightness).toBe(140);
     expect(clean.settings.gridSize).toBe(4);
     expect(clean.nodes.find((node) => node.id === "node-storage")?.task?.due).toBe("2026-09-18");
+    expect(clean.nodes.every((node) => node.trashedAt === null)).toBe(true);
+  });
+
+  it("normalizes valid trash timestamps and rejects timestamp-shaped junk", () => {
+    const raw = defaultWorkspace();
+    raw.nodes[0].trashedAt = "2026-09-01T12:34:56-05:00";
+    raw.nodes[1].trashedAt = "not-a-date";
+    raw.nodes[2].trashedAt = "2026";
+    const clean = normalizeWorkspace(raw);
+    expect(clean.nodes[0].trashedAt).toBe("2026-09-01T17:34:56.000Z");
+    expect(clean.nodes[1].trashedAt).toBeNull();
+    expect(clean.nodes[2].trashedAt).toBeNull();
   });
 
   it("rejects unknown edge endpoints and duplicate ids", () => {
@@ -139,6 +151,31 @@ describe("workspace store", () => {
     const removed = await store.removeAttachment(candidate, attachment.id, 1);
     expect(removed.revision).toBe(2);
     expect(removed.nodes[0].attachments).toEqual([]);
+    await expect(access(attachmentPath)).rejects.toThrow();
+  });
+
+  it("permanently purges only a trashed thought and commits metadata before attachment cleanup", async () => {
+    const store = await tempStore();
+    const attachment = { id: "attachment-trashed", name: "trashed.txt", mime: "text/plain", size: 7, createdAt: "2026-09-01T12:00:00.000Z" };
+    const attachmentPath = path.join(store.attachmentDirectory, attachment.id);
+    await writeFile(attachmentPath, "discard", { mode: 0o600 });
+    const workspace = await store.read();
+    workspace.nodes[0].attachments.push(attachment);
+    await expect(store.purgeTrashedNode(workspace, workspace.nodes[0].id, 0)).rejects.toMatchObject({ code: "NODE_NOT_TRASHED" });
+    workspace.nodes[0].trashedAt = "2026-09-01T12:30:00.000Z";
+    const trashed = await store.replace(workspace, 0);
+
+    await expect(store.purgeTrashedNode(trashed, trashed.nodes[0].id, 1)).rejects.toThrow(/remove the thought/i);
+    expect((await store.read()).nodes[0].attachments).toHaveLength(1);
+    await expect(access(attachmentPath)).resolves.toBeUndefined();
+
+    const candidate = structuredClone(trashed);
+    const purgedId = candidate.nodes[0].id;
+    candidate.nodes = candidate.nodes.filter((node) => node.id !== purgedId);
+    candidate.edges = candidate.edges.filter((edge) => edge.source !== purgedId && edge.target !== purgedId);
+    const purged = await store.purgeTrashedNode(candidate, purgedId, 1);
+    expect(purged.revision).toBe(2);
+    expect(purged.nodes.some((node) => node.id === purgedId)).toBe(false);
     await expect(access(attachmentPath)).rejects.toThrow();
   });
 

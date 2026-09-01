@@ -25,6 +25,12 @@ function validDate(value) {
   return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : "";
 }
 
+function validTimestamp(value) {
+  if (typeof value !== "string" || value.length > 40 || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/.test(value)) return null;
+  const milliseconds = Date.parse(value);
+  return Number.isFinite(milliseconds) ? new Date(milliseconds).toISOString() : null;
+}
+
 function validWebUrl(value) {
   if (typeof value !== "string" || value.length > 2_048) return "";
   try {
@@ -119,6 +125,7 @@ export function normalizeWorkspace(raw, { revision = 0 } = {}) {
       categoryId: categoryIds.has(node.categoryId) ? node.categoryId : null,
       tags: Array.isArray(node.tags) ? node.tags.slice(0, 30).map((tag) => shortString(tag, 40)).filter(Boolean) : [],
       attachments, links, task,
+      trashedAt: validTimestamp(node.trashedAt),
       createdAt: shortString(node.createdAt, 40, new Date().toISOString()),
       updatedAt: shortString(node.updatedAt, 40, new Date().toISOString()),
     };
@@ -311,6 +318,40 @@ export function createWorkspaceStore({ dataDirectory, now = () => new Date() }) 
     return work;
   }
 
+  async function purgeTrashedNode(raw, nodeId, expectedRevision) {
+    const work = queue.then(async () => {
+      const current = await read();
+      if (current.revision !== expectedRevision) {
+        const error = new Error("Workspace changed in another session. Reload before permanently deleting the thought.");
+        error.code = "REVISION_CONFLICT"; error.current = current; throw error;
+      }
+      const currentNode = current.nodes.find((node) => node.id === nodeId);
+      if (!currentNode) {
+        const error = new Error("Thought not found.");
+        error.code = "NODE_NOT_FOUND";
+        throw error;
+      }
+      if (!currentNode.trashedAt) {
+        const error = new Error("Move the thought to trash before permanently deleting it.");
+        error.code = "NODE_NOT_TRASHED";
+        throw error;
+      }
+      const attachmentIds = new Set(currentNode.attachments.map((attachment) => attachment.id));
+      const next = normalizeWorkspace(raw, { revision: current.revision + 1 });
+      if (next.nodes.some((node) => node.id === nodeId)) throw new Error("Remove the thought from the workspace before permanently deleting it.");
+      if (next.edges.some((edge) => edge.source === nodeId || edge.target === nodeId)) throw new Error("Remove every link to the thought before permanently deleting it.");
+      if (next.nodes.some((node) => node.attachments.some((attachment) => attachmentIds.has(attachment.id)))) {
+        throw new Error("Remove the thought's attachments from workspace metadata before permanently deleting it.");
+      }
+      await writeAtomic(next);
+      currentDocument = next;
+      await Promise.all([...attachmentIds].map((attachmentId) => rm(path.join(attachmentDirectory, attachmentId), { force: true }).catch(() => {})));
+      return structuredClone(next);
+    });
+    queue = work.catch(() => {});
+    return work;
+  }
+
   async function restore(raw, expectedRevision, stagedAttachmentDirectory) {
     const work = queue.then(async () => {
       const current = await read();
@@ -348,8 +389,9 @@ export function createWorkspaceStore({ dataDirectory, now = () => new Date() }) 
   async function readiness() {
     await access(dataDirectory, constants.R_OK | constants.W_OK);
     const workspace = await read();
-    return { revision: workspace.revision, maps: workspace.maps.length, nodes: workspace.nodes.length };
+    const trashed = workspace.nodes.filter((node) => node.trashedAt).length;
+    return { revision: workspace.revision, maps: workspace.maps.length, nodes: workspace.nodes.length - trashed, trashed };
   }
 
-  return { initialize, read, replace, removeAttachment, restore, readiness, dataDirectory, workspacePath, attachmentDirectory };
+  return { initialize, read, replace, removeAttachment, purgeTrashedNode, restore, readiness, dataDirectory, workspacePath, attachmentDirectory };
 }

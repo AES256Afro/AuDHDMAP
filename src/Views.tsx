@@ -1,4 +1,4 @@
-import { flattenThoughtHierarchy, type TaskStatus, type ThoughtNode, type Workspace } from "./model";
+import { flattenThoughtHierarchy, isActiveThought, type TaskStatus, type ThoughtNode, type Workspace } from "./model";
 
 interface ViewProps {
   workspace: Workspace;
@@ -14,13 +14,13 @@ function categoryFor(workspace: Workspace, node: ThoughtNode) {
 }
 
 export function OutlineView(props: ViewProps) {
-  const nodes = props.workspace.nodes.filter((node) => node.mapId === props.mapId);
+  const nodes = props.workspace.nodes.filter((node) => node.mapId === props.mapId && isActiveThought(node));
   const nodeIds = new Set(nodes.map((node) => node.id));
   const childrenCount = new Map<string, number>();
   for (const node of nodes) if (node.parentId) childrenCount.set(node.parentId, (childrenCount.get(node.parentId) ?? 0) + 1);
   const rows = flattenThoughtHierarchy(nodes);
   const references = props.workspace.edges.filter((edge) => edge.type === "reference" && (nodeIds.has(edge.source) || nodeIds.has(edge.target)));
-  const nodeById = new Map(props.workspace.nodes.map((node) => [node.id, node]));
+  const nodeById = new Map(props.workspace.nodes.filter(isActiveThought).map((node) => [node.id, node]));
   const mapById = new Map(props.workspace.maps.map((map) => [map.id, map]));
 
   return <div className="structured-view outline-view">
@@ -47,7 +47,7 @@ const columns: { id: TaskStatus; label: string }[] = [
 ];
 
 export function BoardView(props: ViewProps) {
-  const tasks = props.workspace.nodes.filter((node) => node.mapId === props.mapId && node.task);
+  const tasks = props.workspace.nodes.filter((node) => node.mapId === props.mapId && isActiveThought(node) && node.task);
   return <div className="structured-view board-view"><header><div><span className="eyebrow">Project view</span><h2>Board</h2></div><span>{tasks.length} actionable thoughts</span></header>
     <div className="board-columns">{columns.map((column) => <section className="board-column" key={column.id}><h3>{column.label}<span>{tasks.filter((node) => node.task?.status === column.id).length}</span></h3>
       {tasks.filter((node) => node.task?.status === column.id).map((node) => <button className={`board-card ${props.selectedId === node.id ? "selected" : ""}`} key={node.id} onClick={() => props.onSelect(node.id)}>
@@ -58,7 +58,7 @@ export function BoardView(props: ViewProps) {
 }
 
 export function TimelineView(props: ViewProps) {
-  const nodes = props.workspace.nodes.filter((node) => node.mapId === props.mapId && node.task);
+  const nodes = props.workspace.nodes.filter((node) => node.mapId === props.mapId && isActiveThought(node) && node.task);
   const dated = [...nodes].filter((node) => node.task?.start || node.task?.due).sort((a, b) => (a.task?.start || a.task?.due || "").localeCompare(b.task?.start || b.task?.due || ""));
   const undated = nodes.filter((node) => !node.task?.start && !node.task?.due);
   return <div className="structured-view timeline-view"><header><div><span className="eyebrow">Project view</span><h2>Timeline</h2></div><span>Undated work stays visible</span></header>
@@ -68,7 +68,7 @@ export function TimelineView(props: ViewProps) {
 }
 
 export function GanttView(props: ViewProps) {
-  const tasks = props.workspace.nodes.filter((node) => node.mapId === props.mapId && node.task && (node.task.start || node.task.due));
+  const tasks = props.workspace.nodes.filter((node) => node.mapId === props.mapId && isActiveThought(node) && node.task && (node.task.start || node.task.due));
   const dates = tasks.flatMap((node) => [node.task!.start, node.task!.due]).filter(Boolean).sort();
   const startMs = dates.length ? Date.parse(`${dates[0]}T00:00:00Z`) : Date.now();
   const endMs = dates.length ? Date.parse(`${dates.at(-1)}T00:00:00Z`) : startMs + 7 * 86_400_000;

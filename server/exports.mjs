@@ -34,7 +34,7 @@ export function safeExportSlug(value, fallback = "map") {
 export function exportSelection(workspace, mapId, focusId = null) {
   const map = workspace.maps.find((entry) => entry.id === mapId);
   if (!map) throw new Error("Choose a map that exists before exporting.");
-  const mapNodes = workspace.nodes.filter((node) => node.mapId === mapId);
+  const mapNodes = workspace.nodes.filter((node) => node.mapId === mapId && !node.trashedAt);
   const nodeById = new Map(mapNodes.map((node) => [node.id, node]));
   if (!focusId || !nodeById.has(focusId)) return { map, nodes: mapNodes, focus: null };
 

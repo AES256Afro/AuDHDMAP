@@ -2,7 +2,7 @@
 
 ## Intended boundary
 
-AuDHDMAP 0.3.0 is a private, single-owner application. It is suitable for a trusted individual or household behind BoxPilot, a private network, a VPN, or a carefully configured HTTPS reverse proxy. It is not a multi-tenant collaboration service and does not implement per-map roles, public sharing, or anonymous write access.
+AuDHDMAP 0.4.0 is a private, single-owner application. It is suitable for a trusted individual or household behind BoxPilot, a private network, a VPN, or a carefully configured HTTPS reverse proxy. It is not a multi-tenant collaboration service and does not implement per-map roles, public sharing, or anonymous write access.
 
 ## Controls in this release
 
@@ -19,6 +19,7 @@ AuDHDMAP 0.3.0 is a private, single-owner application. It is suitable for a trus
 - Markdown preview is sanitized before it enters the DOM. Web links are restricted to HTTP and HTTPS and open with referrer isolation.
 - Backup restore rejects unsafe or unexpected paths, duplicate entries, excessive entry counts, excessive expanded bytes, oversized files, invalid manifests, inventory mismatches, metadata mismatches, and checksum failures before mutation.
 - Persistence uses private permissions, unique temporary files, atomic workspace renames, revision checks, a serialized mutation queue, and crash recovery for the restore swap.
+- Thought deletion is recoverable by default. Permanent deletion is accepted only for an already-trashed record at the current revision; metadata commits before attachment bytes are removed, and in-tab history is cleared so undo cannot resurrect dangling metadata.
 - Dependencies are lockfile-pinned. The optional `fsevents` install script is explicitly denied, the package tree has verified registry signatures, and the release gate runs the production dependency audit.
 
 ## Operator responsibilities

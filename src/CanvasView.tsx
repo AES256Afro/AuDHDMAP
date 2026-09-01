@@ -3,7 +3,7 @@ import {
   Background, Connection, Controls, Edge, Handle, MarkerType, Node, NodeProps, NodeResizer,
   Position, ReactFlow, ReactFlowProvider, type ResizeParams, useReactFlow,
 } from "@xyflow/react";
-import { descendantThoughtIds, type Category, type MapGroup, type ThoughtNode, type Workspace } from "./model";
+import { descendantThoughtIds, isActiveThought, type Category, type MapGroup, type ThoughtNode, type Workspace } from "./model";
 
 type ThoughtData = { thought: ThoughtNode; category: Category | null };
 type GroupData = { group: MapGroup; onResize: (id: string, size: ResizeParams) => void };
@@ -38,7 +38,7 @@ const GroupCard = memo(function GroupCard({ data, selected }: NodeProps<Node<Gro
 const nodeTypes = { thought: ThoughtCard, group: GroupCard };
 
 export function focusedThoughtIds(workspace: Workspace, mapId: string, focusId: string | null) {
-  const mapNodes = workspace.nodes.filter((node) => node.mapId === mapId);
+  const mapNodes = workspace.nodes.filter((node) => node.mapId === mapId && isActiveThought(node));
   const mapNodeIds = new Set(mapNodes.map((node) => node.id));
   if (!focusId || !mapNodeIds.has(focusId)) return mapNodeIds;
 
@@ -47,8 +47,10 @@ export function focusedThoughtIds(workspace: Workspace, mapId: string, focusId: 
 
   let current = nodeById.get(focusId) ?? null;
   while (current?.parentId) {
-    visible.add(current.parentId);
-    current = nodeById.get(current.parentId) ?? null;
+    const parent = nodeById.get(current.parentId) ?? null;
+    if (!parent) break;
+    visible.add(parent.id);
+    current = parent;
   }
 
   const structuralIds = new Set(visible);
@@ -77,7 +79,7 @@ interface CanvasProps {
 
 function CanvasInner(props: CanvasProps) {
   const flow = useReactFlow();
-  const mapNodes = useMemo(() => props.workspace.nodes.filter((node) => node.mapId === props.mapId), [props.workspace.nodes, props.mapId]);
+  const mapNodes = useMemo(() => props.workspace.nodes.filter((node) => node.mapId === props.mapId && isActiveThought(node)), [props.workspace.nodes, props.mapId]);
   const visibleIds = useMemo(
     () => focusedThoughtIds(props.workspace, props.mapId, props.focusId),
     [props.workspace.nodes, props.workspace.edges, props.mapId, props.focusId],

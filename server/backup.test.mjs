@@ -37,8 +37,10 @@ describe("complete backups", () => {
     const workspace = await store.read();
     workspace.nodes[0].attachments.push(attachment);
     workspace.nodes[0].title = "Backed up title";
+    workspace.nodes[0].trashedAt = "2026-09-01T12:30:00.000Z";
     const saved = await store.replace(workspace, 0);
-    const prepared = await prepareBackup({ workspace: saved, attachmentDirectory: store.attachmentDirectory, version: "0.3.0", now: () => new Date("2026-09-01T13:00:00.000Z") });
+    const prepared = await prepareBackup({ workspace: saved, attachmentDirectory: store.attachmentDirectory, version: "0.4.0", now: () => new Date("2026-09-01T13:00:00.000Z") });
+    expect(prepared.manifest.applicationVersion).toBe("0.4.0");
     expect(prepared.manifest.attachments[0].sha256).toMatch(/^[a-f0-9]{64}$/);
     const archivePath = path.join(store.dataDirectory, "roundtrip.zip");
     await writeBackupArchive(createWriteStream(archivePath, { flags: "wx", mode: 0o600 }), prepared);
@@ -48,6 +50,7 @@ describe("complete backups", () => {
     const restored = await restoreBackupArchive({ archivePath, store, expectedRevision: 2 });
     expect(restored.revision).toBe(3);
     expect(restored.nodes[0].title).toBe("Backed up title");
+    expect(restored.nodes[0].trashedAt).toBe("2026-09-01T12:30:00.000Z");
     expect(await readFile(path.join(store.attachmentDirectory, attachment.id), "utf8")).toBe("backup payload");
   });
 

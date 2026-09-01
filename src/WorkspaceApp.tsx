@@ -2,10 +2,10 @@ import DOMPurify from "dompurify";
 import { marked } from "marked";
 import type { ResizeParams } from "@xyflow/react";
 import { ChangeEvent, DragEvent, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { deleteAttachment, importWorkspace, logout, mapExportUrl, restoreBackup, saveWorkspace, uploadAttachment } from "./api";
+import { deleteAttachment, importWorkspace, logout, mapExportUrl, purgeTrashedThought, restoreBackup, saveWorkspace, uploadAttachment } from "./api";
 import { CanvasView } from "./CanvasView";
 import {
-  descendantThoughtIds, formatBytes, isPreviewableImage, newId, themeLabels, type MapGroup, type TaskStatus, type ThoughtNode, type ViewMode,
+  descendantThoughtIds, formatBytes, gridLayoutPositions, isActiveThought, isPreviewableImage, newId, themeLabels, treeLayoutPositions, type MapGroup, type TaskStatus, type ThoughtNode, type ViewMode,
   viewLabels, type Workspace, type WorkspaceSettings,
 } from "./model";
 import { BoardView, GanttView, OutlineView, TimelineView } from "./Views";
@@ -26,13 +26,16 @@ export function WorkspaceApp({ initialWorkspace, username, onSignedOut }: Props)
   const [workspace, setWorkspace] = useState(initialWorkspace);
   const [activeMapId, setActiveMapId] = useState(initialWorkspace.maps[0].id);
   const [view, setView] = useState<ViewMode>("canvas");
-  const [selectedId, setSelectedId] = useState<string | null>(initialWorkspace.nodes.find((node) => node.mapId === initialWorkspace.maps[0].id)?.id ?? null);
+  const [selectedId, setSelectedId] = useState<string | null>(initialWorkspace.nodes.find((node) => node.mapId === initialWorkspace.maps[0].id && isActiveThought(node))?.id ?? null);
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [focusId, setFocusId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  const [quickCaptureOpen, setQuickCaptureOpen] = useState(false);
+  const [trashOpen, setTrashOpen] = useState(false);
+  const [purgingId, setPurgingId] = useState<string | null>(null);
   const [restoring, setRestoring] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [saveError, setSaveError] = useState("");
@@ -111,21 +114,23 @@ export function WorkspaceApp({ initialWorkspace, username, onSignedOut }: Props)
     return () => window.removeEventListener("beforeunload", protectUnsaved);
   }, [saveState]);
 
-  const nodeById = useMemo(() => new Map(workspace.nodes.map((node) => [node.id, node])), [workspace.nodes]);
+  const activeNodes = useMemo(() => workspace.nodes.filter(isActiveThought), [workspace.nodes]);
+  const trashedNodes = useMemo(() => workspace.nodes.filter((node) => !isActiveThought(node)), [workspace.nodes]);
+  const nodeById = useMemo(() => new Map(activeNodes.map((node) => [node.id, node])), [activeNodes]);
   const mapById = useMemo(() => new Map(workspace.maps.map((map) => [map.id, map])), [workspace.maps]);
   const nodeCountByMap = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const node of workspace.nodes) counts.set(node.mapId, (counts.get(node.mapId) ?? 0) + 1);
+    for (const node of activeNodes) counts.set(node.mapId, (counts.get(node.mapId) ?? 0) + 1);
     return counts;
-  }, [workspace.nodes]);
+  }, [activeNodes]);
   const selected = selectedId ? nodeById.get(selectedId) ?? null : null;
   const selectedGroup = workspace.groups.find((group) => group.id === selectedGroupId) ?? null;
   const activeMap = mapById.get(activeMapId) ?? workspace.maps[0];
   const deferredSearch = useDeferredValue(search);
   const searchResults = useMemo(() => {
     const query = deferredSearch.trim().toLocaleLowerCase();
-    return query ? workspace.nodes.filter((node) => `${node.title} ${node.note} ${node.tags.join(" ")}`.toLocaleLowerCase().includes(query)).slice(0, 20) : [];
-  }, [deferredSearch, workspace.nodes]);
+    return query ? activeNodes.filter((node) => `${node.title} ${node.note} ${node.tags.join(" ")}`.toLocaleLowerCase().includes(query)).slice(0, 20) : [];
+  }, [deferredSearch, activeNodes]);
   const focusPath = useMemo(() => {
     if (!focusId) return [];
     const path: ThoughtNode[] = []; const seen = new Set<string>();
@@ -144,7 +149,7 @@ export function WorkspaceApp({ initialWorkspace, username, onSignedOut }: Props)
 
   function navigateToNode(id: string) {
     const node = workspaceRef.current.nodes.find((item) => item.id === id);
-    if (!node) return;
+    if (!node || !isActiveThought(node)) return;
     setActiveMapId(node.mapId); setSelectedId(node.id); setSelectedGroupId(null); setFocusId(null); setView("canvas");
   }
 
@@ -152,7 +157,7 @@ export function WorkspaceApp({ initialWorkspace, username, onSignedOut }: Props)
     const id = newId("node"); const now = new Date().toISOString();
     mutate((current) => ({
       ...current,
-      nodes: [...current.nodes, { id, mapId: activeMapId, parentId, groupId: null, title: "New thought", note: "", x, y, width: 190, shape: current.settings.nodeShape, categoryId: null, tags: [], attachments: [], links: [], task: null, createdAt: now, updatedAt: now }],
+      nodes: [...current.nodes, { id, mapId: activeMapId, parentId, groupId: null, title: "New thought", note: "", x, y, width: 190, shape: current.settings.nodeShape, categoryId: null, tags: [], attachments: [], links: [], task: null, trashedAt: null, createdAt: now, updatedAt: now }],
       edges: parentId ? [...current.edges, { id: newId("edge"), mapId: activeMapId, source: parentId, target: id, type: "branch", label: "" }] : current.edges,
     }));
     setSelectedId(id); setSelectedGroupId(null);
@@ -161,6 +166,23 @@ export function WorkspaceApp({ initialWorkspace, username, onSignedOut }: Props)
       title?.focus(); title?.select();
     });
     return id;
+  }
+
+  function quickCapture(titles: string[]) {
+    const cleanTitles = titles.map((title) => title.trim().slice(0, 240)).filter(Boolean).slice(0, 100);
+    if (!cleanTitles.length) return;
+    const mapNodes = workspaceRef.current.nodes.filter((node) => node.mapId === activeMapId && isActiveThought(node));
+    const startY = mapNodes.length ? Math.min(90_000, Math.max(...mapNodes.map((node) => node.y)) + 150) : 100;
+    const now = new Date().toISOString();
+    const created = cleanTitles.map((title, index) => ({
+      id: newId("node"), mapId: activeMapId, parentId: null, groupId: null, title, note: "",
+      x: 100 + (index % 3) * 270, y: startY + Math.floor(index / 3) * 130, width: 190,
+      shape: workspaceRef.current.settings.nodeShape, categoryId: null, tags: [], attachments: [], links: [], task: null,
+      trashedAt: null, createdAt: now, updatedAt: now,
+    } satisfies ThoughtNode));
+    mutate((current) => ({ ...current, nodes: [...current.nodes, ...created] }));
+    setSelectedId(created.at(-1)!.id); setSelectedGroupId(null); setQuickCaptureOpen(false);
+    setToast(`Captured ${created.length} unconnected thought${created.length === 1 ? "" : "s"}. Undo removes the whole batch.`);
   }
 
   function connect(source: string, target: string) {
@@ -173,8 +195,9 @@ export function WorkspaceApp({ initialWorkspace, username, onSignedOut }: Props)
 
   function addReference(source: string, target: string, label: string) {
     if (source === target) return;
-    const sourceNode = workspaceRef.current.nodes.find((node) => node.id === source);
-    if (!sourceNode) return;
+    const sourceNode = workspaceRef.current.nodes.find((node) => node.id === source && isActiveThought(node));
+    const targetNode = workspaceRef.current.nodes.find((node) => node.id === target && isActiveThought(node));
+    if (!sourceNode || !targetNode) return;
     if (workspaceRef.current.edges.some((edge) => edge.type === "reference" && ((edge.source === source && edge.target === target) || (edge.source === target && edge.target === source)))) {
       setToast("Those thoughts are already linked."); return;
     }
@@ -191,8 +214,8 @@ export function WorkspaceApp({ initialWorkspace, username, onSignedOut }: Props)
 
   function createBoundary() {
     if (!selected) return;
-    const enclosed = descendantThoughtIds(workspace.nodes, activeMapId, selected.id);
-    const nodes = workspace.nodes.filter((node) => enclosed.has(node.id));
+    const enclosed = descendantThoughtIds(activeNodes, activeMapId, selected.id);
+    const nodes = activeNodes.filter((node) => enclosed.has(node.id));
     const padding = 52;
     const x = Math.min(...nodes.map((node) => node.x)) - padding;
     const y = Math.min(...nodes.map((node) => node.y)) - padding;
@@ -215,7 +238,7 @@ export function WorkspaceApp({ initialWorkspace, username, onSignedOut }: Props)
     mutate((current) => ({
       ...current,
       groups: current.groups.map((item) => item.id === id ? { ...item, x, y } : item),
-      nodes: current.nodes.map((node) => node.groupId === id ? { ...node, x: node.x + dx, y: node.y + dy } : node),
+      nodes: current.nodes.map((node) => node.groupId === id && isActiveThought(node) ? { ...node, x: node.x + dx, y: node.y + dy } : node),
     }));
   }
 
@@ -224,27 +247,17 @@ export function WorkspaceApp({ initialWorkspace, username, onSignedOut }: Props)
   }
 
   function autoLayout(mode: "tree" | "grid") {
-    const nodes = workspace.nodes.filter((node) => node.mapId === activeMapId);
+    const nodes = activeNodes.filter((node) => node.mapId === activeMapId);
     const positions = new Map<string, { x: number; y: number }>();
-    if (mode === "grid") nodes.forEach((node, index) => positions.set(node.id, { x: 100 + (index % 3) * 280, y: 100 + Math.floor(index / 3) * 150 }));
-    else {
-      const children = new Map<string | null, ThoughtNode[]>();
-      nodes.forEach((node) => { const siblings = children.get(node.parentId); if (siblings) siblings.push(node); else children.set(node.parentId, [node]); });
-      let row = 0;
-      const walk = (parent: string | null, depth: number) => (children.get(parent) ?? []).forEach((node) => {
-        const ownRow = row++;
-        positions.set(node.id, { x: 100 + depth * 270, y: 90 + ownRow * 135 });
-        walk(node.id, depth + 1);
-      });
-      walk(null, 0);
-    }
+    if (mode === "grid") for (const [id, position] of gridLayoutPositions(nodes)) positions.set(id, position);
+    else for (const [id, position] of treeLayoutPositions(nodes)) positions.set(id, position);
     mutate((current) => ({ ...current, nodes: current.nodes.map((node) => positions.has(node.id) ? { ...node, ...positions.get(node.id)! } : node) }));
     setToast(`${mode === "tree" ? "Tree" : "Grid"} layout applied. Undo is available.`);
   }
 
   function outdentSelected() {
     if (!selected?.parentId) return;
-    const parent = workspace.nodes.find((node) => node.id === selected.parentId);
+    const parent = activeNodes.find((node) => node.id === selected.parentId);
     const nextParentId = parent?.parentId ?? null;
     mutate((current) => ({
       ...current,
@@ -279,10 +292,20 @@ export function WorkspaceApp({ initialWorkspace, username, onSignedOut }: Props)
     const id = selected.id;
     mutate((current) => ({
       ...current,
-      nodes: current.nodes.filter((node) => node.id !== id).map((node) => node.parentId === id ? { ...node, parentId: null } : node),
-      edges: current.edges.filter((edge) => edge.source !== id && edge.target !== id),
+      nodes: current.nodes.map((node) => node.id === id ? { ...node, trashedAt: new Date().toISOString(), updatedAt: new Date().toISOString() } : node),
     }));
-    setSelectedId(null);
+    setSelectedId(null); if (focusId === id) setFocusId(null);
+    setToast("Thought moved to trash. Its structure and attachments are preserved.");
+  }
+
+  function restoreTrashed(id: string) {
+    const thought = workspaceRef.current.nodes.find((node) => node.id === id && !isActiveThought(node));
+    if (!thought) return;
+    mutate((current) => ({
+      ...current,
+      nodes: current.nodes.map((node) => node.id === id ? { ...node, trashedAt: null, updatedAt: new Date().toISOString() } : node),
+    }));
+    setToast(`Restored “${thought.title}” with its original relationships.`);
   }
 
   function deleteSelectedGroup() {
@@ -371,6 +394,7 @@ export function WorkspaceApp({ initialWorkspace, username, onSignedOut }: Props)
       try {
         const saved = await deleteAttachment(attachmentId, candidate, revisionRef.current);
         revisionRef.current = saved.revision;
+        historyRef.current = []; futureRef.current = [];
         if (versionRef.current === operationVersion) {
           workspaceRef.current = saved; setWorkspace(saved); setSaveState("saved"); saveStateRef.current = "saved";
         } else {
@@ -388,12 +412,47 @@ export function WorkspaceApp({ initialWorkspace, username, onSignedOut }: Props)
     await work;
   }
 
+  async function permanentlyDeleteTrashed(nodeId: string) {
+    if (!await ensureSaved("Save the workspace successfully before permanently deleting a thought.")) return;
+    const thought = workspaceRef.current.nodes.find((node) => node.id === nodeId && !isActiveThought(node));
+    if (!thought) { setToast("That thought is no longer in trash."); return; }
+    const operationVersion = versionRef.current;
+    const candidate = {
+      ...workspaceRef.current,
+      nodes: workspaceRef.current.nodes.filter((node) => node.id !== nodeId),
+      edges: workspaceRef.current.edges.filter((edge) => edge.source !== nodeId && edge.target !== nodeId),
+    };
+    setPurgingId(nodeId); setSaveState("saving"); saveStateRef.current = "saving";
+    const work = queueRef.current.then(async () => {
+      try {
+        const saved = await purgeTrashedThought(nodeId, candidate, revisionRef.current);
+        revisionRef.current = saved.revision;
+        historyRef.current = []; futureRef.current = [];
+        if (versionRef.current === operationVersion) {
+          workspaceRef.current = saved; setWorkspace(saved); setSaveState("saved"); saveStateRef.current = "saved";
+        } else {
+          const current = { ...workspaceRef.current, revision: saved.revision };
+          workspaceRef.current = current; setWorkspace(current); setSaveState("unsaved"); saveStateRef.current = "unsaved";
+        }
+        setSaveError(""); setToast(`Permanently deleted “${thought.title}” and its attachment data.`);
+      } catch (error) {
+        setSaveState("failed"); saveStateRef.current = "failed";
+        setSaveError(error instanceof Error ? error.message : "Thought could not be permanently deleted.");
+        setToast(error instanceof Error ? error.message : "Thought could not be permanently deleted.");
+      } finally { setPurgingId(null); }
+    });
+    queueRef.current = work.catch(() => {});
+    await work;
+  }
+
   useEffect(() => {
     function keys(event: KeyboardEvent) {
       const target = event.target as HTMLElement;
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") { event.preventDefault(); enqueueSave(); return; }
       if (event.key === "Escape") {
-        if (helpOpen) setHelpOpen(false);
+        if (quickCaptureOpen) setQuickCaptureOpen(false);
+        else if (trashOpen && !purgingId) setTrashOpen(false);
+        else if (helpOpen) setHelpOpen(false);
         else if (settingsOpen) setSettingsOpen(false);
         else if (exportOpen && !restoring) setExportOpen(false);
         else if (target === searchRef.current) { setSearch(""); searchRef.current?.blur(); }
@@ -401,11 +460,13 @@ export function WorkspaceApp({ initialWorkspace, username, onSignedOut }: Props)
         else { setSelectedId(null); setSelectedGroupId(null); }
         return;
       }
+      if (quickCaptureOpen || trashOpen || helpOpen || settingsOpen || exportOpen) return;
       if (["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName) || target.isContentEditable) return;
-      if (event.repeat && ["n", "Tab", "Enter"].includes(event.key)) return;
+      if (event.repeat && ["n", "q", "tab", "enter"].includes(event.key.toLowerCase())) return;
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") { event.preventDefault(); event.shiftKey ? redo() : undo(); return; }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "y") { event.preventDefault(); redo(); return; }
       if (event.key.toLowerCase() === "n") { event.preventDefault(); createThought(null); }
+      else if (event.key.toLowerCase() === "q") { event.preventDefault(); setQuickCaptureOpen(true); }
       else if (event.key === "/") { event.preventDefault(); searchRef.current?.focus(); }
       else if (event.key === "Tab" && event.shiftKey && selected) { event.preventDefault(); outdentSelected(); }
       else if (event.key === "Tab" && selected) { event.preventDefault(); createThought(selected.id, selected.x + 280, selected.y + 120); }
@@ -426,9 +487,10 @@ export function WorkspaceApp({ initialWorkspace, username, onSignedOut }: Props)
     <aside className="workspace-rail">
       <div className="brand"><span className="brand-network" aria-hidden="true">⌘</span><div><strong>AuDHDMAP</strong><small>{themeLabels[workspace.settings.theme]}</small></div></div>
       <button className="new-thought" onClick={() => createThought(selected?.id ?? null)}><span>＋</span> New thought</button>
+      <button className="quick-capture-button" onClick={() => setQuickCaptureOpen(true)}><span>≡</span> Quick capture <kbd>Q</kbd></button>
       <label className="search-box"><span>⌕</span><input ref={searchRef} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search maps and notes" /></label>
-      {search ? <div className="search-results"><span>{searchResults.length} results</span>{searchResults.map((node) => <button key={node.id} onClick={() => { navigateToNode(node.id); setSearch(""); }}><strong>{node.title}</strong><small>{mapById.get(node.mapId)?.title}</small></button>)}</div> : <nav className="map-list" aria-label="Maps"><div className="rail-heading"><span>Maps</span><button aria-label="Add map" onClick={addMap}>＋</button></div>{workspace.maps.map((map) => <button key={map.id} className={activeMapId === map.id ? "active" : ""} onClick={() => { setActiveMapId(map.id); setSelectedId(workspace.nodes.find((node) => node.mapId === map.id)?.id ?? null); setSelectedGroupId(null); setFocusId(null); }}><span>⌂</span><span>{map.title}</span><small>{nodeCountByMap.get(map.id) ?? 0}</small></button>)}</nav>}
-      <div className="rail-bottom"><button onClick={() => setSettingsOpen(true)}>⚙ <span>Visual settings</span></button><button onClick={() => setHelpOpen(true)}>? <span>Help and shortcuts</span></button><button onClick={signOut}>⇥ <span>Sign out {username}</span></button></div>
+      {search ? <div className="search-results"><span>{searchResults.length} results</span>{searchResults.map((node) => <button key={node.id} onClick={() => { navigateToNode(node.id); setSearch(""); }}><strong>{node.title}</strong><small>{mapById.get(node.mapId)?.title}</small></button>)}</div> : <nav className="map-list" aria-label="Maps"><div className="rail-heading"><span>Maps</span><button aria-label="Add map" onClick={addMap}>＋</button></div>{workspace.maps.map((map) => <button key={map.id} className={activeMapId === map.id ? "active" : ""} onClick={() => { setActiveMapId(map.id); setSelectedId(activeNodes.find((node) => node.mapId === map.id)?.id ?? null); setSelectedGroupId(null); setFocusId(null); }}><span>⌂</span><span>{map.title}</span><small>{nodeCountByMap.get(map.id) ?? 0}</small></button>)}</nav>}
+      <div className="rail-bottom"><button onClick={() => setTrashOpen(true)}>♲ <span>Trash</span>{trashedNodes.length > 0 && <small>{trashedNodes.length}</small>}</button><button onClick={() => setSettingsOpen(true)}>⚙ <span>Visual settings</span></button><button onClick={() => setHelpOpen(true)}>? <span>Help and shortcuts</span></button><button onClick={signOut}>⇥ <span>Sign out {username}</span></button></div>
     </aside>
 
     <main className="workspace-main">
@@ -438,7 +500,7 @@ export function WorkspaceApp({ initialWorkspace, username, onSignedOut }: Props)
       </header>
       {focusId && <div className="focus-banner"><nav aria-label="Focused branch path"><span>{activeMap.title}</span>{focusPath.map((node, index) => <button key={node.id} aria-current={index === focusPath.length - 1 ? "location" : undefined} onClick={() => setFocusId(node.id)}>› {node.title}</button>)}</nav><button onClick={() => setFocusId(null)}>Exit focus</button></div>}
       {view === "canvas" && <div className="canvas-shell">
-        <div className="canvas-toolbar"><button onClick={() => createThought(null)}>＋ Thought</button><button disabled={!selected} onClick={() => selected && createThought(selected.id, selected.x + 270, selected.y + 130)}>↳ Child</button><button disabled={!selected} onClick={createBoundary}>▢ Enclose branch</button><button onClick={() => autoLayout("tree")}>Tree layout</button><button onClick={() => autoLayout("grid")}>Grid layout</button><button disabled={!selected} onClick={() => selected && setFocusId(focusId === selected.id ? null : selected.id)}>◎ Focus branch</button><label><input type="checkbox" checked={workspace.settings.snapToGrid} onChange={(event) => mutate((current) => ({ ...current, settings: { ...current.settings, snapToGrid: event.target.checked } }))} /> Grid {workspace.settings.gridSize}</label></div>
+        <div className="canvas-toolbar"><button onClick={() => createThought(null)}>＋ Thought</button><button onClick={() => setQuickCaptureOpen(true)}>≡ Quick capture</button><button disabled={!selected} onClick={() => selected && createThought(selected.id, selected.x + 270, selected.y + 130)}>↳ Child</button><button disabled={!selected} onClick={createBoundary}>▢ Enclose branch</button><button onClick={() => autoLayout("tree")}>Tree layout</button><button onClick={() => autoLayout("grid")}>Grid layout</button><button disabled={!selected} onClick={() => selected && setFocusId(focusId === selected.id ? null : selected.id)}>◎ Focus branch</button><label><input type="checkbox" checked={workspace.settings.snapToGrid} onChange={(event) => mutate((current) => ({ ...current, settings: { ...current.settings, snapToGrid: event.target.checked } }))} /> Grid {workspace.settings.gridSize}</label></div>
         <CanvasView
           workspace={workspace}
           mapId={activeMapId}
@@ -466,9 +528,52 @@ export function WorkspaceApp({ initialWorkspace, username, onSignedOut }: Props)
     {settingsOpen && <VisualSettings settings={workspace.settings} onChange={(patch) => mutate((current) => ({ ...current, settings: { ...current.settings, ...patch } }))} onClose={() => setSettingsOpen(false)} />}
     {helpOpen && <HelpDialog onClose={() => setHelpOpen(false)} />}
     {exportOpen && <ExportDialog workspace={workspace} mapId={activeMap.id} focusId={focusId} restoring={restoring} onRestore={handleBackupRestore} onClose={() => setExportOpen(false)} />}
+    {quickCaptureOpen && <QuickCaptureDialog onCapture={quickCapture} onClose={() => setQuickCaptureOpen(false)} />}
+    {trashOpen && <TrashDialog nodes={trashedNodes} maps={workspace.maps} purgingId={purgingId} onRestore={restoreTrashed} onPurge={permanentlyDeleteTrashed} onClose={() => setTrashOpen(false)} />}
     {toast && <div className="toast" role="status" onAnimationEnd={() => setToast("")}>{toast}</div>}
     <div className="crt-overlay" aria-hidden="true" />
   </div>;
+}
+
+function QuickCaptureDialog({ onCapture, onClose }: { onCapture: (titles: string[]) => void; onClose: () => void }) {
+  const [draft, setDraft] = useState("");
+  const titles = draft.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const accepted = titles.slice(0, 100);
+  return <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="quick-capture-dialog" role="dialog" aria-modal="true" aria-labelledby="quick-capture-title">
+    <header><div><span className="eyebrow">Thoughts first, structure later</span><h2 id="quick-capture-title">Quick capture</h2></div><button aria-label="Close quick capture" onClick={onClose}>×</button></header>
+    <p>Put one thought on each line. AuDHDMAP will add them as a clean, unconnected batch on the current map.</p>
+    <textarea autoFocus aria-label="Thoughts to capture" value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => {
+      if ((event.metaKey || event.ctrlKey) && event.key === "Enter" && accepted.length) { event.preventDefault(); onCapture(accepted); }
+    }} placeholder={"Call the electrician\nCompare backup drives\nSketch the migration order"} />
+    <footer><span>{accepted.length} of 100 thoughts ready{titles.length > 100 ? `, ${titles.length - 100} over the limit` : ""}</span><div><button onClick={onClose}>Cancel</button><button className="primary-button" disabled={!accepted.length} onClick={() => onCapture(accepted)}>Capture {accepted.length || ""} thought{accepted.length === 1 ? "" : "s"}</button></div></footer>
+  </section></div>;
+}
+
+function TrashDialog({ nodes, maps, purgingId, onRestore, onPurge, onClose }: {
+  nodes: ThoughtNode[];
+  maps: Workspace["maps"];
+  purgingId: string | null;
+  onRestore: (id: string) => void;
+  onPurge: (id: string) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [confirmId, setConfirmId] = useState<string | null>(null);
+  const mapById = new Map(maps.map((map) => [map.id, map]));
+  const ordered = [...nodes].sort((left, right) => (right.trashedAt ?? "").localeCompare(left.trashedAt ?? ""));
+  useEffect(() => { if (confirmId && !nodes.some((node) => node.id === confirmId)) setConfirmId(null); }, [confirmId, nodes]);
+  return <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && !purgingId && onClose()}><section className="trash-dialog" role="dialog" aria-modal="true" aria-labelledby="trash-title">
+    <header><div><span className="eyebrow">Recoverable by default</span><h2 id="trash-title">Trash</h2></div><button autoFocus aria-label="Close trash" disabled={Boolean(purgingId)} onClick={onClose}>×</button></header>
+    <p>Trashed thoughts stay out of maps, search, projects, and ordinary exports. Complete ZIP backups still include them and their attachments.</p>
+    {ordered.length === 0 ? <div className="trash-empty"><span>♲</span><strong>Trash is empty</strong><small>Deleting a thought moves it here first.</small></div> : <div className="trash-list">{ordered.map((node) => <article key={node.id}>
+      <div><strong>{node.title}</strong><small>{mapById.get(node.mapId)?.title ?? "Unknown map"} · {node.attachments.length} attachment{node.attachments.length === 1 ? "" : "s"}</small></div>
+      <button disabled={Boolean(purgingId)} onClick={() => { setConfirmId(null); onRestore(node.id); }}>Restore</button>
+      <button className={confirmId === node.id ? "confirm-purge" : ""} disabled={Boolean(purgingId)} onClick={() => {
+        if (confirmId !== node.id) { setConfirmId(node.id); return; }
+        void onPurge(node.id);
+      }}>{purgingId === node.id ? "Deleting..." : confirmId === node.id ? "Confirm permanent delete" : "Delete permanently"}</button>
+    </article>)}</div>}
+    {confirmId && !purgingId && <p className="purge-warning">This second action cannot be undone. The thought record, its links, and its stored attachment bytes will be removed.</p>}
+  </section></div>;
 }
 
 function ExportDialog({ workspace, mapId, focusId, restoring, onRestore, onClose }: {
@@ -481,7 +586,7 @@ function ExportDialog({ workspace, mapId, focusId, restoring, onRestore, onClose
 }) {
   const [backup, setBackup] = useState<File | null>(null);
   const map = workspace.maps.find((entry) => entry.id === mapId)!;
-  const focus = focusId ? workspace.nodes.find((node) => node.id === focusId) : null;
+  const focus = focusId ? workspace.nodes.find((node) => node.id === focusId && isActiveThought(node)) : null;
   const scope = focus ? `Focused branch: ${focus.title}` : `Current map: ${map.title}`;
   return <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && !restoring && onClose()}><section className="export-dialog" role="dialog" aria-modal="true" aria-labelledby="export-title">
     <header><div><span className="eyebrow">Portable by design</span><h2 id="export-title">Export and recovery</h2></div><button autoFocus aria-label="Close export" disabled={restoring} onClick={onClose}>×</button></header>
@@ -523,7 +628,8 @@ function Inspector({ workspace, selected, updateNode, deleteNode, navigateToNode
   if (!selected) return <aside className="inspector empty-inspector"><div><span>○</span><h2>No thought selected</h2><p>Select a thought or boundary to edit it.</p></div></aside>;
   const thought = selected;
   const category = workspace.categories.find((item) => item.id === thought.categoryId);
-  const references = workspace.edges.filter((edge) => edge.type === "reference" && (edge.source === thought.id || edge.target === thought.id));
+  const activeIds = new Set(workspace.nodes.filter(isActiveThought).map((node) => node.id));
+  const references = workspace.edges.filter((edge) => edge.type === "reference" && activeIds.has(edge.source) && activeIds.has(edge.target) && (edge.source === thought.id || edge.target === thought.id));
 
   async function uploadFiles(chosen: File[]) {
     if (!chosen.length) return;
@@ -569,7 +675,7 @@ function Inspector({ workspace, selected, updateNode, deleteNode, navigateToNode
     <section className="inspector-section"><div className="section-heading"><h3>Task</h3><button onClick={toggleTask}>{selected.task ? "Remove task fields" : "Make actionable"}</button></div>{selected.task && <div className="task-grid"><label>Status<select value={selected.task.status} onChange={(event) => updateNode(selected.id, { task: { ...selected.task!, status: event.target.value as TaskStatus } })}>{taskStatuses.map((status) => <option key={status.id} value={status.id}>{status.label}</option>)}</select></label><label>Priority<select value={selected.task.priority} onChange={(event) => updateNode(selected.id, { task: { ...selected.task!, priority: event.target.value as "low" | "medium" | "high" } })}><option>low</option><option>medium</option><option>high</option></select></label><label>Start<input type="date" value={selected.task.start} onChange={(event) => updateNode(selected.id, { task: { ...selected.task!, start: event.target.value } })} /></label><label>Due<input type="date" value={selected.task.due} onChange={(event) => updateNode(selected.id, { task: { ...selected.task!, due: event.target.value } })} /></label><label className="progress-label">Progress <output>{selected.task.progress}%</output><input type="range" min="0" max="100" step="5" value={selected.task.progress} onChange={(event) => updateNode(selected.id, { task: { ...selected.task!, progress: Number(event.target.value) } })} /></label><label className="check-label"><input type="checkbox" checked={selected.task.milestone} onChange={(event) => updateNode(selected.id, { task: { ...selected.task!, milestone: event.target.checked } })} /> Milestone</label></div>}</section>
     <section className="inspector-section references"><div className="section-heading"><h3>Linked thoughts</h3><span>{references.length}</span></div>
       {references.map((edge) => { const relatedId = edge.source === thought.id ? edge.target : edge.source; const related = workspace.nodes.find((node) => node.id === relatedId); const map = workspace.maps.find((item) => item.id === related?.mapId); return <div className="reference-card" key={edge.id}><button onClick={() => related && navigateToNode(related.id)}><strong>{related?.title ?? "Missing thought"}</strong><small>{edge.label || "related"} · {map?.title}</small></button><button aria-label={`Remove link to ${related?.title}`} onClick={() => removeReference(edge.id)}>×</button></div>; })}
-      <div className="reference-builder"><select aria-label="Thought to link" value={referenceTarget} onChange={(event) => setReferenceTarget(event.target.value)}><option value="">Choose any thought...</option>{workspace.maps.map((map) => <optgroup key={map.id} label={map.title}>{workspace.nodes.filter((node) => node.mapId === map.id && node.id !== thought.id).map((node) => <option key={node.id} value={node.id}>{node.title}</option>)}</optgroup>)}</select><input aria-label="Reference label" value={referenceLabel} onChange={(event) => setReferenceLabel(event.target.value)} placeholder="related" /><button disabled={!referenceTarget} onClick={() => { if (referenceTarget) { addReference(thought.id, referenceTarget, referenceLabel); setReferenceTarget(""); } }}>＋ Link thoughts</button></div>
+      <div className="reference-builder"><select aria-label="Thought to link" value={referenceTarget} onChange={(event) => setReferenceTarget(event.target.value)}><option value="">Choose any thought...</option>{workspace.maps.map((map) => <optgroup key={map.id} label={map.title}>{workspace.nodes.filter((node) => node.mapId === map.id && node.id !== thought.id && isActiveThought(node)).map((node) => <option key={node.id} value={node.id}>{node.title}</option>)}</optgroup>)}</select><input aria-label="Reference label" value={referenceLabel} onChange={(event) => setReferenceLabel(event.target.value)} placeholder="related" /><button disabled={!referenceTarget} onClick={() => { if (referenceTarget) { addReference(thought.id, referenceTarget, referenceLabel); setReferenceTarget(""); } }}>＋ Link thoughts</button></div>
     </section>
     <section className="inspector-section attachments"><div className="section-heading"><h3>Media</h3><button disabled={uploading} onClick={() => inputRef.current?.click()}>{uploading ? "Uploading..." : "＋ File"}</button><input ref={inputRef} hidden multiple type="file" onChange={files} /></div>
       <div className="attachment-drop" role="button" tabIndex={0} onClick={() => inputRef.current?.click()} onKeyDown={(event) => (event.key === "Enter" || event.key === " ") && inputRef.current?.click()} onDragOver={(event) => event.preventDefault()} onDrop={drop}>Drop files or a web link here</div>
@@ -616,7 +722,7 @@ function Range({ label, value, min, max, onChange }: { label: string; value: num
 function HelpDialog({ onClose }: { onClose: () => void }) {
   return <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="help-dialog" role="dialog" aria-modal="true" aria-labelledby="help-title"><header><div><span className="eyebrow">Nothing hidden</span><h2 id="help-title">Help and shortcuts</h2></div><button autoFocus aria-label="Close help" onClick={onClose}>×</button></header>
     <p>Buttons remain available when you do not want to use the keyboard. Shortcuts are ignored while you are typing in a field.</p>
-    <dl><div><dt><kbd>N</kbd></dt><dd>Create and immediately name an unconnected thought</dd></div><div><dt><kbd>Tab</kbd></dt><dd>Create and name a child of the selected thought</dd></div><div><dt><kbd>Shift+Tab</kbd></dt><dd>Move the selected thought out one level</dd></div><div><dt><kbd>Enter</kbd></dt><dd>Create and name a sibling</dd></div><div><dt><kbd>F</kbd></dt><dd>Focus or leave the selected branch</dd></div><div><dt><kbd>/</kbd></dt><dd>Search maps and notes</dd></div><div><dt><kbd>Esc</kbd></dt><dd>Close a panel, leave focus, or clear selection</dd></div><div><dt><kbd>Cmd/Ctrl S</kbd></dt><dd>Save the current workspace now</dd></div><div><dt><kbd>Delete</kbd></dt><dd>Remove the selected thought or boundary</dd></div><div><dt><kbd>Cmd/Ctrl Z</kbd></dt><dd>Undo the last workspace change</dd></div><div><dt><kbd>Cmd/Ctrl Shift Z</kbd></dt><dd>Redo the last undone change</dd></div><div><dt><kbd>?</kbd></dt><dd>Open this help</dd></div></dl>
+    <dl><div><dt><kbd>N</kbd></dt><dd>Create and immediately name an unconnected thought</dd></div><div><dt><kbd>Q</kbd></dt><dd>Capture several unconnected thoughts, one per line</dd></div><div><dt><kbd>Tab</kbd></dt><dd>Create and name a child of the selected thought</dd></div><div><dt><kbd>Shift+Tab</kbd></dt><dd>Move the selected thought out one level</dd></div><div><dt><kbd>Enter</kbd></dt><dd>Create and name a sibling</dd></div><div><dt><kbd>F</kbd></dt><dd>Focus or leave the selected branch</dd></div><div><dt><kbd>/</kbd></dt><dd>Search maps and notes</dd></div><div><dt><kbd>Esc</kbd></dt><dd>Close a panel, leave focus, or clear selection</dd></div><div><dt><kbd>Cmd/Ctrl S</kbd></dt><dd>Save the current workspace now</dd></div><div><dt><kbd>Delete</kbd></dt><dd>Move the selected thought to trash or remove a boundary</dd></div><div><dt><kbd>Cmd/Ctrl Z</kbd></dt><dd>Undo the last workspace change</dd></div><div><dt><kbd>Cmd/Ctrl Shift Z</kbd></dt><dd>Redo the last undone change</dd></div><div><dt><kbd>?</kbd></dt><dd>Open this help</dd></div></dl>
     <h3>Canvas basics</h3><p>Double-click empty canvas space to create a thought there. Drag between connection handles to link thoughts on the same map, or use Linked thoughts to connect any two maps. Enclose branch creates an editable boundary around the selected branch. Files and web links can be dropped into the Media panel.</p>
     <button className="primary-button" onClick={onClose}>Back to the map</button>
   </section></div>;

@@ -20,7 +20,7 @@ docker compose ps
 curl -fsS http://127.0.0.1:3010/api/health
 ```
 
-The health response intentionally contains only the version, storage state, revision, and bounded map and thought counts.
+The health response intentionally contains only the version, storage state, revision, and bounded active-map, active-thought, and trash counts.
 
 ## Reverse proxies and HTTPS
 
@@ -44,6 +44,16 @@ The ZIP includes:
 - `attachments/<id>` for every attachment referenced by the workspace.
 
 ZIP creation fails rather than producing a partial backup when a referenced attachment is missing or its size does not match the saved metadata.
+
+Complete ZIP backups include trashed thoughts and their attachments. PDF, SVG, Markdown, plain text, and data-only JSON exports omit trash. Use the ZIP when the goal is recovery; use the other formats when the goal is sharing or interchange.
+
+## Trash and permanent deletion
+
+Deleting a thought moves it to workspace trash and keeps its note, task fields, links, attachments, group, and original parent relationship. Restore returns that same record. If a trashed parent has active children, the children appear as temporary roots until the parent is restored.
+
+Permanent deletion requires a second explicit action in the Trash dialog. AuDHDMAP first verifies the current workspace revision, validates that the thought is already trashed, commits a workspace without the record and its links, and only then removes its stored attachment bytes. A stale browser receives a conflict instead of deleting current data.
+
+The in-tab undo and redo history is cleared after any permanent thought or attachment deletion. This prevents a later undo from restoring metadata that points to bytes already removed from storage.
 
 ## Restore drill
 
@@ -82,10 +92,11 @@ docker compose ps
 
 Avoid relying on the moving `edge` tag for a controlled installation. Use the catalog's versioned image.
 
-## Limits in 0.3.0
+## Limits in 0.4.0
 
 - 200 maps
 - 10,000 thoughts
+- 100 thoughts per quick-capture batch
 - 25,000 edges
 - 2,000 boundaries
 - 64 categories
@@ -108,3 +119,5 @@ The large ZIP limits are hard safety ceilings, not capacity recommendations. Ava
 **Startup reports a restore recovery marker problem:** do not delete files at random. Preserve the whole data directory before repair. The fail-closed message means the application could not prove whether the old or new attachment directory belongs with the workspace revision.
 
 **A save reports another session changed the workspace:** reload the current server version before editing again. Revision checks intentionally prevent an older browser tab from silently overwriting newer data.
+
+**Permanent delete reports a stale workspace:** do not retry from the old tab. Reload, inspect the current trash record, and repeat the two-step action only if it is still intended.

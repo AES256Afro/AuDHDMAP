@@ -137,6 +137,45 @@ describe("AuDHDMAP API", () => {
     expect((await fetch(`${base}/api/attachments/${attachment.id}`, { headers: { cookie } })).status).toBe(404);
   });
 
+  it("requires trash and a current revision before permanently deleting a thought", async () => {
+    const { base } = await setup(); const { cookie } = await signIn(base);
+    const uploaded = await fetch(`${base}/api/attachments`, { method: "POST", headers: { cookie, "content-type": "application/octet-stream", "x-audhdmap-request": "1", "x-file-name": "trash-proof.txt", "x-file-type": "text/plain" }, body: "keep until commit" });
+    const attachment = await uploaded.json();
+    const workspace = await (await fetch(`${base}/api/workspace`, { headers: { cookie } })).json();
+    workspace.nodes[0].attachments.push(attachment);
+    const activeDelete = await fetch(`${base}/api/trash/${workspace.nodes[0].id}`, { method: "DELETE", headers: { cookie, "content-type": "application/json", "x-audhdmap-request": "1" }, body: JSON.stringify({ workspace, expectedRevision: 0 }) });
+    expect(activeDelete.status).toBe(404);
+
+    workspace.nodes[0].trashedAt = "2026-09-01T12:30:00.000Z";
+    const trashed = await (await fetch(`${base}/api/workspace`, { method: "PUT", headers: { cookie, "content-type": "application/json", "x-audhdmap-request": "1" }, body: JSON.stringify({ workspace, expectedRevision: 0 }) })).json();
+    const purgedId = trashed.nodes[0].id;
+    const candidate = structuredClone(trashed);
+    candidate.nodes = candidate.nodes.filter((node) => node.id !== purgedId);
+    candidate.edges = candidate.edges.filter((edge) => edge.source !== purgedId && edge.target !== purgedId);
+
+    const stale = await fetch(`${base}/api/trash/${purgedId}`, { method: "DELETE", headers: { cookie, "content-type": "application/json", "x-audhdmap-request": "1" }, body: JSON.stringify({ workspace: candidate, expectedRevision: 0 }) });
+    expect(stale.status).toBe(409);
+    expect((await fetch(`${base}/api/attachments/${attachment.id}`, { headers: { cookie } })).status).toBe(200);
+
+    const removed = await fetch(`${base}/api/trash/${purgedId}`, { method: "DELETE", headers: { cookie, "content-type": "application/json", "x-audhdmap-request": "1" }, body: JSON.stringify({ workspace: candidate, expectedRevision: 1 }) });
+    expect(removed.status).toBe(200);
+    expect(await removed.json()).toMatchObject({ revision: 2 });
+    expect((await fetch(`${base}/api/attachments/${attachment.id}`, { headers: { cookie } })).status).toBe(404);
+  });
+
+  it("excludes trash from ordinary JSON export", async () => {
+    const { base, store } = await setup(); const { cookie } = await signIn(base);
+    const workspace = await store.read();
+    workspace.nodes[0].trashedAt = "2026-09-01T12:30:00.000Z";
+    await store.replace(workspace, 0);
+    const response = await fetch(`${base}/api/export`, { headers: { cookie } });
+    const exported = await response.json();
+    expect(exported.workspace.nodes.some((node) => node.id === workspace.nodes[0].id)).toBe(false);
+    expect(exported.workspace.edges.some((edge) => edge.source === workspace.nodes[0].id || edge.target === workspace.nodes[0].id)).toBe(false);
+    const exportedIds = new Set(exported.workspace.nodes.map((node) => node.id));
+    expect(exported.workspace.nodes.every((node) => node.parentId === null || exportedIds.has(node.parentId))).toBe(true);
+  });
+
   it("exports PDF, SVG, Markdown, and plain text for an authenticated map", async () => {
     const { base } = await setup(); const { cookie } = await signIn(base);
     const formats = [

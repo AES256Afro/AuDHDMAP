@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.0
+
+- Add multi-line quick capture from the `Q` shortcut or canvas, creating one unconnected thought per non-empty line as a single undoable batch.
+- Replace destructive thought deletion with visible workspace trash that preserves notes, tasks, links, attachments, group membership, and original parent relationships.
+- Add exact-record restore and a second-confirmation permanent delete flow.
+- Commit permanent deletion as a revision-checked server transaction before cleaning up attachment bytes.
+- Clear in-tab undo history after a permanent thought or attachment deletion so undo cannot resurrect metadata for bytes that no longer exist.
+- Keep trashed thoughts out of maps, focus, search, task views, counts, PDF, SVG, Markdown, text, and JSON interchange while retaining them in complete ZIP backups.
+- Treat active children of a trashed parent as visible roots without rewriting their stored relationship, so restoring the parent reconnects the branch.
+- Extend supported-limit performance measurements and regression coverage across normalization, exports, backups, stale revisions, API deletion, keyboard capture, undo, and deep hierarchies.
+- Make tree auto-layout iterative and keep tree and grid coordinates inside the persisted workspace bounds at the 10,000-thought limit.
+
 ## 0.3.0
 
 - Add complete ZIP backups with workspace data, attachment bytes, a versioned manifest, and SHA-256 checksums.

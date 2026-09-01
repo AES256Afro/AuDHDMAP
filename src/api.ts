@@ -73,3 +73,11 @@ export async function deleteAttachment(id: string, workspace: Workspace, expecte
     body: JSON.stringify({ workspace, expectedRevision }),
   }));
 }
+
+export async function purgeTrashedThought(id: string, workspace: Workspace, expectedRevision: number) {
+  return parse<Workspace>(await fetch(`/api/trash/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json", ...mutationHeaders },
+    body: JSON.stringify({ workspace, expectedRevision }),
+  }));
+}

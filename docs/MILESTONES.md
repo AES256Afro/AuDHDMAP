@@ -31,16 +31,26 @@ Acceptance criteria:
 - Daily export and restore actions are understandable without documentation.
 - Measured performance and security findings are fixed and protected by regression tests.
 
-## 0.4.0 - Faster daily capture and recovery
+## 0.4.0 - Faster capture and recoverable deletion
 
-Status: queued after 0.3.0
+Status: shipped
 
-- Multi-line quick capture creates a reviewable stack of thoughts.
+- Multi-line quick capture creates one unconnected thought per non-empty line as a single undoable action.
+- Deleting a thought moves it to a visible workspace trash instead of immediately erasing its note, task fields, links, attachments, or original parent relationship.
+- Restoring a thought returns the same record and relationships without creating a duplicate.
+- Permanent deletion is an explicit second action. The server commits the revision-checked metadata removal before attachment bytes are removed.
+- Trashed thoughts stay out of maps, search, project views, focus, counts, and ordinary exports, while complete backups retain them and their attachments.
+- Keyboard, API, deep-hierarchy, backup round-trip, stale-tab, and live interaction tests cover the full path.
+
+## 0.5.0 - Large-workspace navigation and snapshots
+
+Status: dependent on 0.4.0 recovery behavior
+
 - A keyboard quick switcher jumps between maps, thoughts, tasks, and recent work without changing layout.
 - Large-map canvas and structured views virtualize or progressively reveal content where DOM volume, not data traversal, becomes the bottleneck.
-- Workspace trash and automatic local snapshots make deletion recovery independent of the current tab's undo history.
+- Automatic local snapshots provide recovery points beyond the current tab's undo history.
 
-## 0.5.0 - Interoperable project handoff
+## 0.6.0 - Interoperable project handoff
 
 Status: dependent on 0.3.0 export stability
 

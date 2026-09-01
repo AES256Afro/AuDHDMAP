@@ -28,6 +28,7 @@ const workspace = {
     attachments: [],
     links: [],
     task: null,
+    trashedAt: null,
     createdAt: now,
     updatedAt: now,
   })),
@@ -43,6 +44,11 @@ function timed(action) {
 
 const normalized = timed(() => normalizeWorkspace(workspace));
 const markdown = timed(() => renderMapMarkdown(normalized.value, "map-benchmark"));
+const trashWorkspace = {
+  ...normalized.value,
+  nodes: normalized.value.nodes.map((node, index) => index % 10 === 0 ? { ...node, trashedAt: "2026-09-01T13:00:00.000Z" } : node),
+};
+const trashFilteredMarkdown = timed(() => renderMapMarkdown(trashWorkspace, "map-benchmark"));
 const deepWorkspace = { ...workspace, nodes: workspace.nodes.map((node, index) => ({ ...node, parentId: index === 0 ? null : `node-${index - 1}` })) };
 const deepNormalized = timed(() => normalizeWorkspace(deepWorkspace));
 const deepText = timed(() => renderMapText(deepNormalized.value, "map-benchmark"));
@@ -61,6 +67,8 @@ try {
     normalizeMilliseconds: Number(normalized.milliseconds.toFixed(1)),
     markdownMilliseconds: Number(markdown.milliseconds.toFixed(1)),
     markdownBytes: Buffer.byteLength(markdown.value),
+    trashFilteredThoughts: trashWorkspace.nodes.filter((node) => !node.trashedAt).length,
+    trashFilteredMarkdownMilliseconds: Number(trashFilteredMarkdown.milliseconds.toFixed(1)),
     deepChainNormalizeMilliseconds: Number(deepNormalized.milliseconds.toFixed(1)),
     deepChainTextMilliseconds: Number(deepText.milliseconds.toFixed(1)),
     deepChainTextBytes: Buffer.byteLength(deepText.value),
@@ -68,7 +76,7 @@ try {
     twentyDetachedReadsMilliseconds: Number(cachedReadMilliseconds.toFixed(1)),
   };
   console.log(JSON.stringify(report, null, 2));
-  if (normalized.milliseconds > 2_000 || markdown.milliseconds > 2_000 || deepNormalized.milliseconds > 2_000 || deepText.milliseconds > 2_000 || saveMilliseconds > 5_000 || cachedReadMilliseconds > 5_000) {
+  if (normalized.milliseconds > 2_000 || markdown.milliseconds > 2_000 || trashFilteredMarkdown.milliseconds > 2_000 || deepNormalized.milliseconds > 2_000 || deepText.milliseconds > 2_000 || saveMilliseconds > 5_000 || cachedReadMilliseconds > 5_000) {
     throw new Error("A supported-limit performance budget was exceeded.");
   }
 } finally {
