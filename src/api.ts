@@ -44,6 +44,20 @@ export async function importWorkspace(workspace: unknown, expectedRevision: numb
   }));
 }
 
+export async function restoreBackup(file: File, expectedRevision: number) {
+  return parse<Workspace>(await fetch("/api/import/backup", {
+    method: "POST",
+    headers: { "Content-Type": file.type === "application/zip" ? file.type : "application/octet-stream", "x-audhdmap-revision": String(expectedRevision), ...mutationHeaders },
+    body: file,
+  }));
+}
+
+export function mapExportUrl(format: "pdf" | "svg" | "md" | "txt", mapId: string, focusId: string | null) {
+  const query = new URLSearchParams({ mapId });
+  if (focusId) query.set("focusId", focusId);
+  return `/api/export/map.${format}?${query}`;
+}
+
 export async function uploadAttachment(file: File) {
   return parse<Attachment>(await fetch("/api/attachments", {
     method: "POST",
@@ -52,7 +66,10 @@ export async function uploadAttachment(file: File) {
   }));
 }
 
-export async function deleteAttachment(id: string) {
-  const response = await fetch(`/api/attachments/${encodeURIComponent(id)}`, { method: "DELETE", headers: mutationHeaders });
-  if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || "Could not delete attachment.");
+export async function deleteAttachment(id: string, workspace: Workspace, expectedRevision: number) {
+  return parse<Workspace>(await fetch(`/api/attachments/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json", ...mutationHeaders },
+    body: JSON.stringify({ workspace, expectedRevision }),
+  }));
 }

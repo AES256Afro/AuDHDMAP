@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
 import { focusedThoughtIds } from "./CanvasView";
-import type { ThoughtNode, Workspace } from "./model";
+import { descendantThoughtIds, flattenThoughtHierarchy, type ThoughtNode, type Workspace } from "./model";
 
 function thought(id: string, mapId: string, parentId: string | null): ThoughtNode {
   return { id, mapId, parentId, groupId: null, title: id, note: "", x: 0, y: 0, width: 190, shape: "rounded", categoryId: null, tags: [], attachments: [], links: [], task: null, createdAt: "2026-09-01T12:00:00.000Z", updatedAt: "2026-09-01T12:00:00.000Z" };
@@ -46,5 +46,14 @@ describe("branch focus", () => {
     const workspace = fixture();
     const visible = focusedThoughtIds(workspace, "map-home-server", null);
     expect(visible.size).toBe(7);
+  });
+
+  it("walks a deeply nested map iteratively without overflowing the call stack", () => {
+    const nodes = Array.from({ length: 10_000 }, (_, index) => thought(`node-${index}`, "map-deep", index ? `node-${index - 1}` : null));
+    const descendants = descendantThoughtIds(nodes, "map-deep", "node-0");
+    const rows = flattenThoughtHierarchy(nodes);
+    expect(descendants.size).toBe(10_000);
+    expect(rows).toHaveLength(10_000);
+    expect(rows.at(-1)).toMatchObject({ depth: 9_999, node: { id: "node-9999" } });
   });
 });

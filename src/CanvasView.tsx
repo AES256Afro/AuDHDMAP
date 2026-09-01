@@ -3,7 +3,7 @@ import {
   Background, Connection, Controls, Edge, Handle, MarkerType, Node, NodeProps, NodeResizer,
   Position, ReactFlow, ReactFlowProvider, type ResizeParams, useReactFlow,
 } from "@xyflow/react";
-import type { Category, MapGroup, ThoughtNode, Workspace } from "./model";
+import { descendantThoughtIds, type Category, type MapGroup, type ThoughtNode, type Workspace } from "./model";
 
 type ThoughtData = { thought: ThoughtNode; category: Category | null };
 type GroupData = { group: MapGroup; onResize: (id: string, size: ResizeParams) => void };
@@ -42,29 +42,20 @@ export function focusedThoughtIds(workspace: Workspace, mapId: string, focusId: 
   const mapNodeIds = new Set(mapNodes.map((node) => node.id));
   if (!focusId || !mapNodeIds.has(focusId)) return mapNodeIds;
 
-  const visible = new Set<string>([focusId]);
-  const descendants = new Set<string>([focusId]);
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const node of mapNodes) {
-      if (node.parentId && descendants.has(node.parentId) && !descendants.has(node.id)) {
-        descendants.add(node.id);
-        visible.add(node.id);
-        changed = true;
-      }
-    }
-  }
+  const visible = descendantThoughtIds(mapNodes, mapId, focusId);
+  const nodeById = new Map(mapNodes.map((node) => [node.id, node]));
 
-  let current = mapNodes.find((node) => node.id === focusId) ?? null;
+  let current = nodeById.get(focusId) ?? null;
   while (current?.parentId) {
     visible.add(current.parentId);
-    current = mapNodes.find((node) => node.id === current?.parentId) ?? null;
+    current = nodeById.get(current.parentId) ?? null;
   }
 
-  for (const edge of workspace.edges.filter((edge) => edge.type === "reference")) {
-    if (visible.has(edge.source) && mapNodeIds.has(edge.target)) visible.add(edge.target);
-    if (visible.has(edge.target) && mapNodeIds.has(edge.source)) visible.add(edge.source);
+  const structuralIds = new Set(visible);
+  for (const edge of workspace.edges) {
+    if (edge.type !== "reference") continue;
+    if (structuralIds.has(edge.source) && mapNodeIds.has(edge.target)) visible.add(edge.target);
+    if (structuralIds.has(edge.target) && mapNodeIds.has(edge.source)) visible.add(edge.source);
   }
   return visible;
 }
@@ -86,18 +77,20 @@ interface CanvasProps {
 
 function CanvasInner(props: CanvasProps) {
   const flow = useReactFlow();
-  const mapNodes = props.workspace.nodes.filter((node) => node.mapId === props.mapId);
+  const mapNodes = useMemo(() => props.workspace.nodes.filter((node) => node.mapId === props.mapId), [props.workspace.nodes, props.mapId]);
   const visibleIds = useMemo(
     () => focusedThoughtIds(props.workspace, props.mapId, props.focusId),
-    [props.workspace, props.mapId, props.focusId],
+    [props.workspace.nodes, props.workspace.edges, props.mapId, props.focusId],
   );
-  const visibleNodes = mapNodes.filter((node) => visibleIds.has(node.id));
-  const visibleGroups = props.workspace.groups.filter((group) => {
+  const visibleNodes = useMemo(() => mapNodes.filter((node) => visibleIds.has(node.id)), [mapNodes, visibleIds]);
+  const visibleGroupIds = useMemo(() => new Set(visibleNodes.map((node) => node.groupId).filter(Boolean)), [visibleNodes]);
+  const visibleGroups = useMemo(() => props.workspace.groups.filter((group) => {
     if (group.mapId !== props.mapId || group.collapsed) return false;
-    return !props.focusId || visibleNodes.some((node) => node.groupId === group.id);
-  });
+    return !props.focusId || visibleGroupIds.has(group.id);
+  }), [props.workspace.groups, props.mapId, props.focusId, visibleGroupIds]);
+  const categoryById = useMemo(() => new Map(props.workspace.categories.map((category) => [category.id, category])), [props.workspace.categories]);
 
-  const nodes: Node[] = [
+  const nodes: Node[] = useMemo(() => [
     ...visibleGroups.map((group) => ({
       id: group.id,
       type: "group",
@@ -116,14 +109,14 @@ function CanvasInner(props: CanvasProps) {
       position: { x: thought.x, y: thought.y },
       data: {
         thought,
-        category: props.workspace.categories.find((category) => category.id === thought.categoryId) ?? null,
+        category: thought.categoryId ? categoryById.get(thought.categoryId) ?? null : null,
       },
       style: { width: thought.width },
       selected: props.selectedId === thought.id,
       zIndex: 2,
     })),
-  ];
-  const edges: Edge[] = props.workspace.edges.filter((edge) => visibleIds.has(edge.source) && visibleIds.has(edge.target)).map((edge) => ({
+  ], [visibleGroups, visibleNodes, props.onResizeGroup, props.selectedGroupId, props.selectedId, categoryById]);
+  const edges: Edge[] = useMemo(() => props.workspace.edges.filter((edge) => visibleIds.has(edge.source) && visibleIds.has(edge.target)).map((edge) => ({
     id: edge.id,
     source: edge.source,
     target: edge.target,
@@ -133,7 +126,7 @@ function CanvasInner(props: CanvasProps) {
     style: { strokeWidth: props.workspace.settings.lineThickness, opacity: .8 },
     labelStyle: { fill: "var(--text-muted)", fontSize: 11 },
     markerEnd: edge.type === "reference" ? { type: MarkerType.ArrowClosed } : undefined,
-  }));
+  })), [props.workspace.edges, props.workspace.settings.lineThickness, props.workspace.settings.reducedMotion, visibleIds]);
 
   return <ReactFlow
     nodes={nodes}

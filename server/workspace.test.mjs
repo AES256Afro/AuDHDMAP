@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -72,6 +72,29 @@ describe("workspace normalization", () => {
     expect(clean.groups[0].description).toBe("A bounded preparation area");
     expect(clean.nodes[0].groupId).toBeNull();
   });
+
+  it("breaks parent cycles and cross-map parents before outline consumers recurse", () => {
+    const raw = defaultWorkspace();
+    raw.nodes[0].parentId = raw.nodes[1].id;
+    raw.nodes[1].parentId = raw.nodes[0].id;
+    raw.nodes.find((node) => node.id === "node-inbox").parentId = raw.nodes[0].id;
+    const clean = normalizeWorkspace(raw);
+    expect(clean.nodes.find((node) => node.id === raw.nodes[0].id).parentId).toBeNull();
+    expect(clean.nodes.find((node) => node.id === "node-inbox").parentId).toBeNull();
+  });
+
+  it("rejects duplicate attachment and web-link ids", () => {
+    const duplicateAttachment = defaultWorkspace();
+    const attachment = { id: "attachment-shared", name: "same.txt", mime: "text/plain", size: 4, createdAt: "2026-09-01T12:00:00.000Z" };
+    duplicateAttachment.nodes[0].attachments = [attachment];
+    duplicateAttachment.nodes[1].attachments = [attachment];
+    expect(() => normalizeWorkspace(duplicateAttachment)).toThrow(/Duplicate attachment id/i);
+
+    const duplicateLink = defaultWorkspace();
+    const link = { id: "link-shared", title: "Same", url: "https://example.com/", createdAt: "2026-09-01T12:00:00.000Z" };
+    duplicateLink.nodes[0].links = [link]; duplicateLink.nodes[1].links = [link];
+    expect(() => normalizeWorkspace(duplicateLink)).toThrow(/Duplicate web link id/i);
+  });
 });
 
 describe("workspace store", () => {
@@ -91,5 +114,64 @@ describe("workspace store", () => {
     await store.replace(first, 0);
     await expect(store.replace(first, 0)).rejects.toMatchObject({ code: "REVISION_CONFLICT" });
     expect((await store.read()).revision).toBe(1);
+  });
+
+  it("returns detached snapshots from its in-memory read cache", async () => {
+    const store = await tempStore();
+    const first = await store.read();
+    first.maps[0].title = "Mutated outside the store";
+    expect((await store.read()).maps[0].title).not.toBe("Mutated outside the store");
+  });
+
+  it("commits attachment metadata removal before deleting its bytes", async () => {
+    const store = await tempStore();
+    const attachment = { id: "attachment-atomic", name: "atomic.txt", mime: "text/plain", size: 4, createdAt: "2026-09-01T12:00:00.000Z" };
+    const attachmentPath = path.join(store.attachmentDirectory, attachment.id);
+    await writeFile(attachmentPath, "safe", { mode: 0o600 });
+    const workspace = await store.read(); workspace.nodes[0].attachments.push(attachment);
+    const referenced = await store.replace(workspace, 0);
+
+    await expect(store.removeAttachment(referenced, attachment.id, 1)).rejects.toThrow(/remove the attachment/i);
+    await expect(access(attachmentPath)).resolves.toBeUndefined();
+    expect((await store.read()).nodes[0].attachments).toHaveLength(1);
+
+    const candidate = structuredClone(referenced); candidate.nodes[0].attachments = [];
+    const removed = await store.removeAttachment(candidate, attachment.id, 1);
+    expect(removed.revision).toBe(2);
+    expect(removed.nodes[0].attachments).toEqual([]);
+    await expect(access(attachmentPath)).rejects.toThrow();
+  });
+
+  it("rolls back attachment directories after a restore interrupted before its workspace commit", async () => {
+    const store = await tempStore();
+    await writeFile(path.join(store.attachmentDirectory, "old-file"), "old", { mode: 0o600 });
+    const previousName = ".attachments-previous-11111111-1111-4111-8111-111111111111";
+    await rename(store.attachmentDirectory, path.join(store.dataDirectory, previousName));
+    await mkdir(store.attachmentDirectory, { mode: 0o700 });
+    await writeFile(path.join(store.attachmentDirectory, "new-file"), "new", { mode: 0o600 });
+    await writeFile(path.join(store.dataDirectory, ".restore-state.json"), `${JSON.stringify({ previousDirectory: previousName, targetRevision: 1 })}\n`, { mode: 0o600 });
+
+    const recovered = createWorkspaceStore({ dataDirectory: store.dataDirectory });
+    await recovered.initialize();
+    expect(await readFile(path.join(recovered.attachmentDirectory, "old-file"), "utf8")).toBe("old");
+    await expect(access(path.join(recovered.attachmentDirectory, "new-file"))).rejects.toThrow();
+    await expect(access(path.join(store.dataDirectory, ".restore-state.json"))).rejects.toThrow();
+  });
+
+  it("finishes cleanup after a restore interrupted after its workspace commit", async () => {
+    const store = await tempStore();
+    const workspace = await store.read(); workspace.maps[0].title = "Committed restore";
+    await store.replace(workspace, 0);
+    const previousName = ".attachments-previous-22222222-2222-4222-8222-222222222222";
+    await mkdir(path.join(store.dataDirectory, previousName), { mode: 0o700 });
+    await writeFile(path.join(store.dataDirectory, previousName, "old-file"), "old", { mode: 0o600 });
+    await writeFile(path.join(store.attachmentDirectory, "new-file"), "new", { mode: 0o600 });
+    await writeFile(path.join(store.dataDirectory, ".restore-state.json"), `${JSON.stringify({ previousDirectory: previousName, targetRevision: 1 })}\n`, { mode: 0o600 });
+
+    const recovered = createWorkspaceStore({ dataDirectory: store.dataDirectory });
+    expect((await recovered.initialize()).maps[0].title).toBe("Committed restore");
+    expect(await readFile(path.join(recovered.attachmentDirectory, "new-file"), "utf8")).toBe("new");
+    await expect(access(path.join(store.dataDirectory, previousName))).rejects.toThrow();
+    await expect(access(path.join(store.dataDirectory, ".restore-state.json"))).rejects.toThrow();
   });
 });

@@ -1,6 +1,6 @@
 services:
   audhdmap:
-    image: ghcr.io/aes256afro/audhdmap:0.2.0
+    image: ghcr.io/aes256afro/audhdmap:0.3.0
     build:
       context: .
     restart: unless-stopped
@@ -10,6 +10,7 @@ services:
       AUDHDMAP_ADMIN_USERNAME: ${AUDHDMAP_ADMIN_USERNAME:-owner}
       AUDHDMAP_ADMIN_PASSWORD: ${AUDHDMAP_ADMIN_PASSWORD:?Set AUDHDMAP_ADMIN_PASSWORD in .env}
       AUDHDMAP_SESSION_SECRET: ${AUDHDMAP_SESSION_SECRET:?Set AUDHDMAP_SESSION_SECRET in .env}
+      AUDHDMAP_TRUST_PROXY: ${AUDHDMAP_TRUST_PROXY:-0}
     volumes:
       - audhdmap-data:/data
     security_opt:

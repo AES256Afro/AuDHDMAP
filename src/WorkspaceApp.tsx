@@ -1,11 +1,11 @@
 import DOMPurify from "dompurify";
 import { marked } from "marked";
 import type { ResizeParams } from "@xyflow/react";
-import { ChangeEvent, DragEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { deleteAttachment, importWorkspace, logout, saveWorkspace, uploadAttachment } from "./api";
+import { ChangeEvent, DragEvent, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { deleteAttachment, importWorkspace, logout, mapExportUrl, restoreBackup, saveWorkspace, uploadAttachment } from "./api";
 import { CanvasView } from "./CanvasView";
 import {
-  formatBytes, isPreviewableImage, newId, themeLabels, type MapGroup, type TaskStatus, type ThoughtNode, type ViewMode,
+  descendantThoughtIds, formatBytes, isPreviewableImage, newId, themeLabels, type MapGroup, type TaskStatus, type ThoughtNode, type ViewMode,
   viewLabels, type Workspace, type WorkspaceSettings,
 } from "./model";
 import { BoardView, GanttView, OutlineView, TimelineView } from "./Views";
@@ -32,6 +32,8 @@ export function WorkspaceApp({ initialWorkspace, username, onSignedOut }: Props)
   const [search, setSearch] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [restoring, setRestoring] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [saveError, setSaveError] = useState("");
   const [changeVersion, setChangeVersion] = useState(0);
@@ -39,13 +41,17 @@ export function WorkspaceApp({ initialWorkspace, username, onSignedOut }: Props)
   const workspaceRef = useRef(workspace);
   const revisionRef = useRef(workspace.revision);
   const versionRef = useRef(changeVersion);
+  const saveStateRef = useRef<SaveState>(saveState);
+  const queuedVersionRef = useRef(-1);
   const queueRef = useRef(Promise.resolve());
   const historyRef = useRef<Workspace[]>([]);
   const futureRef = useRef<Workspace[]>([]);
   const importRef = useRef<HTMLInputElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
 
   workspaceRef.current = workspace;
   versionRef.current = changeVersion;
+  saveStateRef.current = saveState;
 
   useEffect(() => {
     document.documentElement.dataset.theme = workspace.settings.theme;
@@ -63,34 +69,70 @@ export function WorkspaceApp({ initialWorkspace, username, onSignedOut }: Props)
       workspaceRef.current = next;
       return next;
     });
-    setSaveState("unsaved"); setSaveError("");
-    setChangeVersion((version) => version + 1);
+    setSaveState("unsaved"); saveStateRef.current = "unsaved"; setSaveError("");
+    setChangeVersion((version) => { const next = version + 1; versionRef.current = next; return next; });
+  }, []);
+
+  const enqueueSave = useCallback(() => {
+    if (saveStateRef.current === "saved") return;
+    const snapshot = workspaceRef.current;
+    const savingVersion = versionRef.current;
+    if (queuedVersionRef.current >= savingVersion && saveStateRef.current !== "failed") return;
+    queuedVersionRef.current = savingVersion;
+    queueRef.current = queueRef.current.then(async () => {
+      setSaveState("saving"); saveStateRef.current = "saving";
+      try {
+        const saved = await saveWorkspace(snapshot, revisionRef.current);
+        revisionRef.current = saved.revision;
+        workspaceRef.current = { ...workspaceRef.current, revision: saved.revision };
+        setWorkspace((current) => ({ ...current, revision: saved.revision }));
+        setSaveError("");
+        const nextState = versionRef.current === savingVersion ? "saved" : "unsaved";
+        setSaveState(nextState); saveStateRef.current = nextState;
+      } catch (error) {
+        if (queuedVersionRef.current === savingVersion) queuedVersionRef.current = savingVersion - 1;
+        setSaveState("failed"); saveStateRef.current = "failed"; setSaveError(error instanceof Error ? error.message : "Autosave failed.");
+      }
+    });
   }, []);
 
   useEffect(() => {
     if (changeVersion === 0) return;
-    const timer = window.setTimeout(() => {
-      const snapshot = workspaceRef.current;
-      const savingVersion = versionRef.current;
-      queueRef.current = queueRef.current.then(async () => {
-        setSaveState("saving");
-        try {
-          const saved = await saveWorkspace(snapshot, revisionRef.current);
-          revisionRef.current = saved.revision;
-          setWorkspace((current) => ({ ...current, revision: saved.revision }));
-          setSaveState(versionRef.current === savingVersion ? "saved" : "unsaved");
-        } catch (error) {
-          setSaveState("failed"); setSaveError(error instanceof Error ? error.message : "Autosave failed.");
-        }
-      });
-    }, 650);
+    const timer = window.setTimeout(enqueueSave, 650);
     return () => window.clearTimeout(timer);
-  }, [changeVersion]);
+  }, [changeVersion, enqueueSave]);
 
-  const selected = workspace.nodes.find((node) => node.id === selectedId) ?? null;
+  useEffect(() => {
+    function protectUnsaved(event: BeforeUnloadEvent) {
+      if (saveState === "saved") return;
+      event.preventDefault();
+    }
+    window.addEventListener("beforeunload", protectUnsaved);
+    return () => window.removeEventListener("beforeunload", protectUnsaved);
+  }, [saveState]);
+
+  const nodeById = useMemo(() => new Map(workspace.nodes.map((node) => [node.id, node])), [workspace.nodes]);
+  const mapById = useMemo(() => new Map(workspace.maps.map((map) => [map.id, map])), [workspace.maps]);
+  const nodeCountByMap = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const node of workspace.nodes) counts.set(node.mapId, (counts.get(node.mapId) ?? 0) + 1);
+    return counts;
+  }, [workspace.nodes]);
+  const selected = selectedId ? nodeById.get(selectedId) ?? null : null;
   const selectedGroup = workspace.groups.find((group) => group.id === selectedGroupId) ?? null;
-  const activeMap = workspace.maps.find((map) => map.id === activeMapId) ?? workspace.maps[0];
-  const searchResults = search.trim() ? workspace.nodes.filter((node) => `${node.title} ${node.note} ${node.tags.join(" ")}`.toLowerCase().includes(search.toLowerCase())).slice(0, 20) : [];
+  const activeMap = mapById.get(activeMapId) ?? workspace.maps[0];
+  const deferredSearch = useDeferredValue(search);
+  const searchResults = useMemo(() => {
+    const query = deferredSearch.trim().toLocaleLowerCase();
+    return query ? workspace.nodes.filter((node) => `${node.title} ${node.note} ${node.tags.join(" ")}`.toLocaleLowerCase().includes(query)).slice(0, 20) : [];
+  }, [deferredSearch, workspace.nodes]);
+  const focusPath = useMemo(() => {
+    if (!focusId) return [];
+    const path: ThoughtNode[] = []; const seen = new Set<string>();
+    let current = nodeById.get(focusId);
+    while (current && !seen.has(current.id)) { path.unshift(current); seen.add(current.id); current = current.parentId ? nodeById.get(current.parentId) : undefined; }
+    return path;
+  }, [focusId, nodeById]);
 
   function updateNode(id: string, patch: Partial<ThoughtNode>) {
     mutate((current) => ({ ...current, nodes: current.nodes.map((node) => node.id === id ? { ...node, ...patch, updatedAt: new Date().toISOString() } : node) }));
@@ -113,7 +155,12 @@ export function WorkspaceApp({ initialWorkspace, username, onSignedOut }: Props)
       nodes: [...current.nodes, { id, mapId: activeMapId, parentId, groupId: null, title: "New thought", note: "", x, y, width: 190, shape: current.settings.nodeShape, categoryId: null, tags: [], attachments: [], links: [], task: null, createdAt: now, updatedAt: now }],
       edges: parentId ? [...current.edges, { id: newId("edge"), mapId: activeMapId, source: parentId, target: id, type: "branch", label: "" }] : current.edges,
     }));
-    setSelectedId(id); setSelectedGroupId(null); return id;
+    setSelectedId(id); setSelectedGroupId(null);
+    window.requestAnimationFrame(() => {
+      const title = document.querySelector<HTMLInputElement>(`.title-input[data-node-id="${id}"]`);
+      title?.focus(); title?.select();
+    });
+    return id;
   }
 
   function connect(source: string, target: string) {
@@ -144,14 +191,7 @@ export function WorkspaceApp({ initialWorkspace, username, onSignedOut }: Props)
 
   function createBoundary() {
     if (!selected) return;
-    const enclosed = new Set([selected.id]);
-    let changed = true;
-    while (changed) {
-      changed = false;
-      for (const node of workspace.nodes.filter((item) => item.mapId === activeMapId)) {
-        if (node.parentId && enclosed.has(node.parentId) && !enclosed.has(node.id)) { enclosed.add(node.id); changed = true; }
-      }
-    }
+    const enclosed = descendantThoughtIds(workspace.nodes, activeMapId, selected.id);
     const nodes = workspace.nodes.filter((node) => enclosed.has(node.id));
     const padding = 52;
     const x = Math.min(...nodes.map((node) => node.x)) - padding;
@@ -189,7 +229,7 @@ export function WorkspaceApp({ initialWorkspace, username, onSignedOut }: Props)
     if (mode === "grid") nodes.forEach((node, index) => positions.set(node.id, { x: 100 + (index % 3) * 280, y: 100 + Math.floor(index / 3) * 150 }));
     else {
       const children = new Map<string | null, ThoughtNode[]>();
-      nodes.forEach((node) => children.set(node.parentId, [...(children.get(node.parentId) ?? []), node]));
+      nodes.forEach((node) => { const siblings = children.get(node.parentId); if (siblings) siblings.push(node); else children.set(node.parentId, [node]); });
       let row = 0;
       const walk = (parent: string | null, depth: number) => (children.get(parent) ?? []).forEach((node) => {
         const ownRow = row++;
@@ -221,7 +261,8 @@ export function WorkspaceApp({ initialWorkspace, username, onSignedOut }: Props)
     if (!previous) return setToast("Nothing to undo yet.");
     futureRef.current = [...futureRef.current.slice(-39), workspaceRef.current];
     setWorkspace(previous); workspaceRef.current = previous;
-    setChangeVersion((version) => version + 1); setSaveState("unsaved");
+    setChangeVersion((version) => { const value = version + 1; versionRef.current = value; return value; });
+    setSaveState("unsaved"); saveStateRef.current = "unsaved";
   }
 
   function redo() {
@@ -229,7 +270,8 @@ export function WorkspaceApp({ initialWorkspace, username, onSignedOut }: Props)
     if (!next) return setToast("Nothing to redo yet.");
     historyRef.current = [...historyRef.current.slice(-39), workspaceRef.current];
     setWorkspace(next); workspaceRef.current = next;
-    setChangeVersion((version) => version + 1); setSaveState("unsaved");
+    setChangeVersion((version) => { const value = version + 1; versionRef.current = value; return value; });
+    setSaveState("unsaved"); saveStateRef.current = "unsaved";
   }
 
   function deleteSelected() {
@@ -260,29 +302,111 @@ export function WorkspaceApp({ initialWorkspace, username, onSignedOut }: Props)
     setActiveMapId(id); setSelectedId(null); setSelectedGroupId(null); setFocusId(null); setView("canvas");
   }
 
+  async function ensureSaved(failureMessage: string) {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (saveStateRef.current === "saved") return true;
+      if (saveStateRef.current !== "saving") enqueueSave();
+      await queueRef.current;
+      if (String(saveStateRef.current) === "saved") return true;
+      if (String(saveStateRef.current) === "failed") break;
+    }
+    setToast(failureMessage);
+    return false;
+  }
+
   async function signOut() {
+    if (!await ensureSaved("Save the workspace successfully before signing out.")) return;
     await logout().catch(() => {}); onSignedOut();
+  }
+
+  async function openExport() {
+    if (!await ensureSaved("Save the workspace successfully before exporting.")) return;
+    setExportOpen(true);
   }
 
   async function handleImport(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]; event.target.value = "";
     if (!file) return;
     try {
+      if (!await ensureSaved("Save the workspace successfully before importing.")) return;
       const parsed = JSON.parse(await file.text());
       const imported = await importWorkspace(parsed, revisionRef.current);
-      revisionRef.current = imported.revision; historyRef.current = []; futureRef.current = [];
-      setWorkspace(imported); workspaceRef.current = imported; setActiveMapId(imported.maps[0].id); setSelectedId(null); setSelectedGroupId(null); setFocusId(null); setSaveState("saved");
+      adoptWorkspace(imported);
       setToast(`Imported ${imported.nodes.length} thoughts from ${file.name}.`);
     } catch (error) { setToast(error instanceof Error ? error.message : "Import failed without changing the workspace."); }
+  }
+
+  function adoptWorkspace(next: Workspace) {
+    revisionRef.current = next.revision; historyRef.current = []; futureRef.current = [];
+    setWorkspace(next); workspaceRef.current = next; setActiveMapId(next.maps[0].id); setSelectedId(null); setSelectedGroupId(null); setFocusId(null);
+    setSaveState("saved"); saveStateRef.current = "saved"; setSaveError("");
+  }
+
+  async function handleBackupRestore(file: File) {
+    if (saveState !== "saved") { setToast("Wait for the current workspace to finish saving before a restore."); return; }
+    setRestoring(true);
+    try {
+      const restored = await restoreBackup(file, revisionRef.current);
+      adoptWorkspace(restored); setExportOpen(false);
+      setToast(`Restored ${restored.nodes.length} thoughts and their attachments from ${file.name}.`);
+    } catch (error) { setToast(error instanceof Error ? error.message : "Restore failed without changing the workspace."); }
+    finally { setRestoring(false); }
+  }
+
+  async function removeNodeAttachment(nodeId: string, attachmentId: string) {
+    if (saveStateRef.current !== "saved") {
+      enqueueSave();
+      await queueRef.current;
+      if (String(saveStateRef.current) !== "saved") { setToast("Save the workspace successfully before removing an attachment."); return; }
+    }
+    const operationVersion = versionRef.current;
+    const candidate = {
+      ...workspaceRef.current,
+      nodes: workspaceRef.current.nodes.map((node) => node.id === nodeId
+        ? { ...node, attachments: node.attachments.filter((attachment) => attachment.id !== attachmentId), updatedAt: new Date().toISOString() }
+        : node),
+    };
+    setSaveState("saving"); saveStateRef.current = "saving";
+    const work = queueRef.current.then(async () => {
+      try {
+        const saved = await deleteAttachment(attachmentId, candidate, revisionRef.current);
+        revisionRef.current = saved.revision;
+        if (versionRef.current === operationVersion) {
+          workspaceRef.current = saved; setWorkspace(saved); setSaveState("saved"); saveStateRef.current = "saved";
+        } else {
+          const current = { ...workspaceRef.current, revision: saved.revision };
+          workspaceRef.current = current; setWorkspace(current); setSaveState("unsaved"); saveStateRef.current = "unsaved";
+        }
+        setSaveError("");
+      } catch (error) {
+        setSaveState("failed"); saveStateRef.current = "failed";
+        setSaveError(error instanceof Error ? error.message : "Attachment could not be removed.");
+        setToast(error instanceof Error ? error.message : "Attachment could not be removed.");
+      }
+    });
+    queueRef.current = work.catch(() => {});
+    await work;
   }
 
   useEffect(() => {
     function keys(event: KeyboardEvent) {
       const target = event.target as HTMLElement;
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") { event.preventDefault(); enqueueSave(); return; }
+      if (event.key === "Escape") {
+        if (helpOpen) setHelpOpen(false);
+        else if (settingsOpen) setSettingsOpen(false);
+        else if (exportOpen && !restoring) setExportOpen(false);
+        else if (target === searchRef.current) { setSearch(""); searchRef.current?.blur(); }
+        else if (focusId) setFocusId(null);
+        else { setSelectedId(null); setSelectedGroupId(null); }
+        return;
+      }
       if (["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName) || target.isContentEditable) return;
+      if (event.repeat && ["n", "Tab", "Enter"].includes(event.key)) return;
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") { event.preventDefault(); event.shiftKey ? redo() : undo(); return; }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "y") { event.preventDefault(); redo(); return; }
       if (event.key.toLowerCase() === "n") { event.preventDefault(); createThought(null); }
+      else if (event.key === "/") { event.preventDefault(); searchRef.current?.focus(); }
       else if (event.key === "Tab" && event.shiftKey && selected) { event.preventDefault(); outdentSelected(); }
       else if (event.key === "Tab" && selected) { event.preventDefault(); createThought(selected.id, selected.x + 280, selected.y + 120); }
       else if (event.key === "Enter" && selected) { event.preventDefault(); createThought(selected.parentId, selected.x, selected.y + 140); }
@@ -302,17 +426,17 @@ export function WorkspaceApp({ initialWorkspace, username, onSignedOut }: Props)
     <aside className="workspace-rail">
       <div className="brand"><span className="brand-network" aria-hidden="true">⌘</span><div><strong>AuDHDMAP</strong><small>{themeLabels[workspace.settings.theme]}</small></div></div>
       <button className="new-thought" onClick={() => createThought(selected?.id ?? null)}><span>＋</span> New thought</button>
-      <label className="search-box"><span>⌕</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search maps and notes" /></label>
-      {search ? <div className="search-results"><span>{searchResults.length} results</span>{searchResults.map((node) => <button key={node.id} onClick={() => { navigateToNode(node.id); setSearch(""); }}><strong>{node.title}</strong><small>{workspace.maps.find((map) => map.id === node.mapId)?.title}</small></button>)}</div> : <nav className="map-list" aria-label="Maps"><div className="rail-heading"><span>Maps</span><button aria-label="Add map" onClick={addMap}>＋</button></div>{workspace.maps.map((map) => <button key={map.id} className={activeMapId === map.id ? "active" : ""} onClick={() => { setActiveMapId(map.id); setSelectedId(workspace.nodes.find((node) => node.mapId === map.id)?.id ?? null); setSelectedGroupId(null); setFocusId(null); }}><span>⌂</span><span>{map.title}</span><small>{workspace.nodes.filter((node) => node.mapId === map.id).length}</small></button>)}</nav>}
+      <label className="search-box"><span>⌕</span><input ref={searchRef} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search maps and notes" /></label>
+      {search ? <div className="search-results"><span>{searchResults.length} results</span>{searchResults.map((node) => <button key={node.id} onClick={() => { navigateToNode(node.id); setSearch(""); }}><strong>{node.title}</strong><small>{mapById.get(node.mapId)?.title}</small></button>)}</div> : <nav className="map-list" aria-label="Maps"><div className="rail-heading"><span>Maps</span><button aria-label="Add map" onClick={addMap}>＋</button></div>{workspace.maps.map((map) => <button key={map.id} className={activeMapId === map.id ? "active" : ""} onClick={() => { setActiveMapId(map.id); setSelectedId(workspace.nodes.find((node) => node.mapId === map.id)?.id ?? null); setSelectedGroupId(null); setFocusId(null); }}><span>⌂</span><span>{map.title}</span><small>{nodeCountByMap.get(map.id) ?? 0}</small></button>)}</nav>}
       <div className="rail-bottom"><button onClick={() => setSettingsOpen(true)}>⚙ <span>Visual settings</span></button><button onClick={() => setHelpOpen(true)}>? <span>Help and shortcuts</span></button><button onClick={signOut}>⇥ <span>Sign out {username}</span></button></div>
     </aside>
 
     <main className="workspace-main">
       <header className="view-header">
         <nav aria-label="Workspace views">{(Object.keys(viewLabels) as ViewMode[]).map((id) => <button key={id} className={view === id ? "active" : ""} onClick={() => setView(id)}><span>{id === "canvas" ? "⌘" : id === "outline" ? "☷" : id === "board" ? "▦" : id === "timeline" ? "◷" : "▤"}</span>{viewLabels[id]}</button>)}</nav>
-        <div className="document-status"><button aria-label="Undo" onClick={undo}>↶</button><button aria-label="Redo" onClick={redo}>↷</button><span className={`save-state ${saveState}`} title={saveError}>{saveState === "saved" ? "✓ Saved" : saveState === "saving" ? "Saving..." : saveState === "failed" ? "Save failed" : "Unsaved"}</span><a href="/api/export" download title="Export workspace">⇩ Export</a><button onClick={() => importRef.current?.click()}>⇧ Import</button><input ref={importRef} hidden type="file" accept="application/json,.json" onChange={handleImport} /></div>
+        <div className="document-status"><button aria-label="Undo" onClick={undo}>↶</button><button aria-label="Redo" onClick={redo}>↷</button><span className={`save-state ${saveState}`} role="status" aria-live="polite" title={saveError}>{saveState === "saved" ? "✓ Saved" : saveState === "saving" ? "Saving..." : saveState === "failed" ? "Save failed" : "Unsaved"}</span>{saveState === "failed" && <button className="retry-save" title={saveError} onClick={enqueueSave}>Retry save</button>}<button onClick={openExport} title="Export and restore">⇩ Export</button><button onClick={() => importRef.current?.click()}>⇧ Import JSON</button><input ref={importRef} hidden type="file" accept="application/json,.json" onChange={handleImport} /></div>
       </header>
-      {focusId && <div className="focus-banner"><span>Focus: <strong>{workspace.nodes.find((node) => node.id === focusId)?.title}</strong></span><button onClick={() => setFocusId(null)}>Exit focus</button></div>}
+      {focusId && <div className="focus-banner"><nav aria-label="Focused branch path"><span>{activeMap.title}</span>{focusPath.map((node, index) => <button key={node.id} aria-current={index === focusPath.length - 1 ? "location" : undefined} onClick={() => setFocusId(node.id)}>› {node.title}</button>)}</nav><button onClick={() => setFocusId(null)}>Exit focus</button></div>}
       {view === "canvas" && <div className="canvas-shell">
         <div className="canvas-toolbar"><button onClick={() => createThought(null)}>＋ Thought</button><button disabled={!selected} onClick={() => selected && createThought(selected.id, selected.x + 270, selected.y + 130)}>↳ Child</button><button disabled={!selected} onClick={createBoundary}>▢ Enclose branch</button><button onClick={() => autoLayout("tree")}>Tree layout</button><button onClick={() => autoLayout("grid")}>Grid layout</button><button disabled={!selected} onClick={() => selected && setFocusId(focusId === selected.id ? null : selected.id)}>◎ Focus branch</button><label><input type="checkbox" checked={workspace.settings.snapToGrid} onChange={(event) => mutate((current) => ({ ...current, settings: { ...current.settings, snapToGrid: event.target.checked } }))} /> Grid {workspace.settings.gridSize}</label></div>
         <CanvasView
@@ -338,15 +462,48 @@ export function WorkspaceApp({ initialWorkspace, username, onSignedOut }: Props)
 
     {selectedGroup
       ? <BoundaryInspector group={selectedGroup} updateGroup={updateGroup} deleteGroup={deleteSelectedGroup} />
-      : <Inspector key={selected?.id ?? "empty"} workspace={workspace} selected={selected} updateNode={updateNode} deleteNode={deleteSelected} navigateToNode={navigateToNode} addReference={addReference} removeReference={removeReference} />}
+      : <Inspector key={selected?.id ?? "empty"} workspace={workspace} selected={selected} updateNode={updateNode} deleteNode={deleteSelected} navigateToNode={navigateToNode} addReference={addReference} removeReference={removeReference} removeAttachment={removeNodeAttachment} />}
     {settingsOpen && <VisualSettings settings={workspace.settings} onChange={(patch) => mutate((current) => ({ ...current, settings: { ...current.settings, ...patch } }))} onClose={() => setSettingsOpen(false)} />}
     {helpOpen && <HelpDialog onClose={() => setHelpOpen(false)} />}
+    {exportOpen && <ExportDialog workspace={workspace} mapId={activeMap.id} focusId={focusId} restoring={restoring} onRestore={handleBackupRestore} onClose={() => setExportOpen(false)} />}
     {toast && <div className="toast" role="status" onAnimationEnd={() => setToast("")}>{toast}</div>}
     <div className="crt-overlay" aria-hidden="true" />
   </div>;
 }
 
-function Inspector({ workspace, selected, updateNode, deleteNode, navigateToNode, addReference, removeReference }: {
+function ExportDialog({ workspace, mapId, focusId, restoring, onRestore, onClose }: {
+  workspace: Workspace;
+  mapId: string;
+  focusId: string | null;
+  restoring: boolean;
+  onRestore: (file: File) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [backup, setBackup] = useState<File | null>(null);
+  const map = workspace.maps.find((entry) => entry.id === mapId)!;
+  const focus = focusId ? workspace.nodes.find((node) => node.id === focusId) : null;
+  const scope = focus ? `Focused branch: ${focus.title}` : `Current map: ${map.title}`;
+  return <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && !restoring && onClose()}><section className="export-dialog" role="dialog" aria-modal="true" aria-labelledby="export-title">
+    <header><div><span className="eyebrow">Portable by design</span><h2 id="export-title">Export and recovery</h2></div><button autoFocus aria-label="Close export" disabled={restoring} onClick={onClose}>×</button></header>
+    <section className="export-section"><div className="export-heading"><div><h3>Share what you see</h3><p>{scope}. PDF includes a visual overview and readable outline.</p></div><span>{focus ? "BRANCH" : "MAP"}</span></div>
+      <div className="export-grid">
+        <a href={mapExportUrl("pdf", mapId, focusId)} download><strong>PDF</strong><span>Visual map plus notes</span></a>
+        <a href={mapExportUrl("svg", mapId, focusId)} download><strong>SVG</strong><span>Scalable visual map</span></a>
+        <a href={mapExportUrl("md", mapId, focusId)} download><strong>Markdown</strong><span>Structured editable outline</span></a>
+        <a href={mapExportUrl("txt", mapId, focusId)} download><strong>Plain text</strong><span>Portable indented outline</span></a>
+      </div>
+    </section>
+    <section className="export-section"><div className="export-heading"><div><h3>Back up everything</h3><p>The ZIP contains workspace data, every attachment, and SHA-256 integrity checks.</p></div><span>FULL</span></div>
+      <div className="backup-actions"><a className="primary-button" href="/api/export/backup.zip" download>⇩ Complete ZIP backup</a><a href="/api/export" download>JSON data only</a></div>
+    </section>
+    <section className="export-section restore-section"><div className="export-heading"><div><h3>Restore a complete backup</h3><p>The archive is validated in a staging area before the current workspace changes.</p></div><span>SAFE</span></div>
+      <label className="backup-picker"><input type="file" accept="application/zip,.zip" disabled={restoring} onChange={(event) => setBackup(event.target.files?.[0] ?? null)} /><span>{backup ? backup.name : "Choose an AuDHDMAP ZIP backup"}</span></label>
+      {backup && <div className="restore-confirm"><p>This replaces the current workspace and attachments. Download a fresh backup first if you need the current state.</p><button className="danger-button" disabled={restoring} onClick={() => onRestore(backup)}>{restoring ? "Validating and restoring..." : "Replace workspace from this backup"}</button></div>}
+    </section>
+  </section></div>;
+}
+
+function Inspector({ workspace, selected, updateNode, deleteNode, navigateToNode, addReference, removeReference, removeAttachment }: {
   workspace: Workspace;
   selected: ThoughtNode | null;
   updateNode: (id: string, patch: Partial<ThoughtNode>) => void;
@@ -354,6 +511,7 @@ function Inspector({ workspace, selected, updateNode, deleteNode, navigateToNode
   navigateToNode: (id: string) => void;
   addReference: (source: string, target: string, label: string) => void;
   removeReference: (id: string) => void;
+  removeAttachment: (nodeId: string, attachmentId: string) => Promise<void>;
 }) {
   const [preview, setPreview] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -399,17 +557,12 @@ function Inspector({ workspace, selected, updateNode, deleteNode, navigateToNode
     if (raw) addWebLink(raw);
   }
 
-  async function removeAttachment(id: string) {
-    await deleteAttachment(id).catch(() => {});
-    updateNode(thought.id, { attachments: thought.attachments.filter((attachment) => attachment.id !== id) });
-  }
-
   function toggleTask() {
     updateNode(thought.id, { task: thought.task ? null : { status: "todo", start: "", due: "", progress: 0, priority: "medium", milestone: false } });
   }
 
   return <aside className="inspector">
-    <header><div className="inspector-symbol" style={{ background: category?.color }}>{category?.icon ?? "○"}</div><input className="title-input" value={selected.title} onChange={(event) => updateNode(selected.id, { title: event.target.value })} /><button aria-label="Delete thought" onClick={deleteNode}>×</button></header>
+    <header><div className="inspector-symbol" style={{ background: category?.color }}>{category?.icon ?? "○"}</div><input className="title-input" data-node-id={selected.id} value={selected.title} onChange={(event) => updateNode(selected.id, { title: event.target.value })} /><button aria-label="Delete thought" onClick={deleteNode}>×</button></header>
     <div className="inspector-tabs"><button className={!preview ? "active" : ""} onClick={() => setPreview(false)}>Note</button><button className={preview ? "active" : ""} onClick={() => setPreview(true)}>Preview</button></div>
     {preview ? <article className="markdown-preview" dangerouslySetInnerHTML={{ __html: html }} /> : <textarea className="note-editor" aria-label="Markdown note" value={selected.note} onChange={(event) => updateNode(selected.id, { note: event.target.value })} placeholder="Write a note with Markdown..." />}
     <section className="inspector-section"><h3>Properties</h3><label>Category<select value={selected.categoryId ?? ""} onChange={(event) => updateNode(selected.id, { categoryId: event.target.value || null })}><option value="">None</option>{workspace.categories.map((item) => <option key={item.id} value={item.id}>{item.icon} {item.name}</option>)}</select></label><label>Tags<input value={selected.tags.join(", ")} onChange={(event) => updateNode(selected.id, { tags: event.target.value.split(",").map((tag) => tag.trim()).filter(Boolean) })} placeholder="storage, research" /></label></section>
@@ -420,7 +573,7 @@ function Inspector({ workspace, selected, updateNode, deleteNode, navigateToNode
     </section>
     <section className="inspector-section attachments"><div className="section-heading"><h3>Media</h3><button disabled={uploading} onClick={() => inputRef.current?.click()}>{uploading ? "Uploading..." : "＋ File"}</button><input ref={inputRef} hidden multiple type="file" onChange={files} /></div>
       <div className="attachment-drop" role="button" tabIndex={0} onClick={() => inputRef.current?.click()} onKeyDown={(event) => (event.key === "Enter" || event.key === " ") && inputRef.current?.click()} onDragOver={(event) => event.preventDefault()} onDrop={drop}>Drop files or a web link here</div>
-      {selected.attachments.map((attachment) => <div className="attachment-card" key={attachment.id}>{isPreviewableImage(attachment.mime) ? <img src={`/api/attachments/${attachment.id}`} alt="" /> : <span>{attachment.mime === "application/pdf" ? "PDF" : "FILE"}</span>}<a href={`/api/attachments/${attachment.id}`} target="_blank" rel="noreferrer"><strong>{attachment.name}</strong><small>{formatBytes(attachment.size)}</small></a><button aria-label={`Remove ${attachment.name}`} onClick={() => removeAttachment(attachment.id)}>×</button></div>)}
+      {selected.attachments.map((attachment) => <div className="attachment-card" key={attachment.id}>{isPreviewableImage(attachment.mime) ? <img src={`/api/attachments/${attachment.id}`} alt="" /> : <span>{attachment.mime === "application/pdf" ? "PDF" : "FILE"}</span>}<a href={`/api/attachments/${attachment.id}`} target="_blank" rel="noreferrer"><strong>{attachment.name}</strong><small>{formatBytes(attachment.size)}</small></a><button aria-label={`Remove ${attachment.name}`} onClick={() => removeAttachment(thought.id, attachment.id)}>×</button></div>)}
       {selected.links.map((link) => <div className="web-link-card" key={link.id}><span>↗</span><a href={link.url} target="_blank" rel="noreferrer"><strong>{link.title}</strong><small>{new URL(link.url).hostname}</small></a><button aria-label={`Remove ${link.title}`} onClick={() => updateNode(thought.id, { links: thought.links.filter((item) => item.id !== link.id) })}>×</button></div>)}
       <div className="link-builder"><input type="url" value={linkUrl} onChange={(event) => setLinkUrl(event.target.value)} placeholder="https://example.com" /><button disabled={!linkUrl.trim()} onClick={() => addWebLink(linkUrl)}>＋ Link</button></div>
     </section>
@@ -442,7 +595,7 @@ function BoundaryInspector({ group, updateGroup, deleteGroup }: {
 
 function VisualSettings({ settings, onChange, onClose }: { settings: WorkspaceSettings; onChange: (patch: Partial<WorkspaceSettings>) => void; onClose: () => void }) {
   function reset() { onChange({ theme: "quiet", snapToGrid: true, gridSize: 16, reducedMotion: false, crtEffects: true, brightness: 100, saturation: 100, lineThickness: 2, branchFont: "system", nodeShape: "rounded" }); }
-  return <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title"><header><div><span className="eyebrow">Workspace appearance</span><h2 id="settings-title">Visual settings</h2></div><button aria-label="Close settings" onClick={onClose}>×</button></header>
+  return <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title"><header><div><span className="eyebrow">Workspace appearance</span><h2 id="settings-title">Visual settings</h2></div><button autoFocus aria-label="Close settings" onClick={onClose}>×</button></header>
     <label>Theme<select value={settings.theme} onChange={(event) => onChange({ theme: event.target.value as WorkspaceSettings["theme"] })}>{Object.entries(themeLabels).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>
     <fieldset><legend>Node shape</legend><div className="shape-options">{(["rounded", "square", "pill", "oval"] as const).map((shape) => <button className={settings.nodeShape === shape ? "active" : ""} key={shape} onClick={() => onChange({ nodeShape: shape })}><i className={`shape-${shape}`} /><span>{shape}</span></button>)}</div></fieldset>
     <label>Branch font<select value={settings.branchFont} onChange={(event) => onChange({ branchFont: event.target.value as WorkspaceSettings["branchFont"] })}><option value="system">System sans</option><option value="mono">Terminal mono</option><option value="serif">Readable serif</option></select></label>
@@ -461,9 +614,9 @@ function Range({ label, value, min, max, onChange }: { label: string; value: num
 }
 
 function HelpDialog({ onClose }: { onClose: () => void }) {
-  return <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="help-dialog" role="dialog" aria-modal="true" aria-labelledby="help-title"><header><div><span className="eyebrow">Nothing hidden</span><h2 id="help-title">Help and shortcuts</h2></div><button aria-label="Close help" onClick={onClose}>×</button></header>
+  return <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="help-dialog" role="dialog" aria-modal="true" aria-labelledby="help-title"><header><div><span className="eyebrow">Nothing hidden</span><h2 id="help-title">Help and shortcuts</h2></div><button autoFocus aria-label="Close help" onClick={onClose}>×</button></header>
     <p>Buttons remain available when you do not want to use the keyboard. Shortcuts are ignored while you are typing in a field.</p>
-    <dl><div><dt><kbd>N</kbd></dt><dd>Create an unconnected thought</dd></div><div><dt><kbd>Tab</kbd></dt><dd>Create a child of the selected thought</dd></div><div><dt><kbd>Shift+Tab</kbd></dt><dd>Move the selected thought out one level</dd></div><div><dt><kbd>Enter</kbd></dt><dd>Create a sibling</dd></div><div><dt><kbd>F</kbd></dt><dd>Focus or leave the selected branch</dd></div><div><dt><kbd>Delete</kbd></dt><dd>Remove the selected thought or boundary</dd></div><div><dt><kbd>Cmd/Ctrl Z</kbd></dt><dd>Undo the last workspace change</dd></div><div><dt><kbd>Cmd/Ctrl Shift Z</kbd></dt><dd>Redo the last undone change</dd></div><div><dt><kbd>?</kbd></dt><dd>Open this help</dd></div></dl>
+    <dl><div><dt><kbd>N</kbd></dt><dd>Create and immediately name an unconnected thought</dd></div><div><dt><kbd>Tab</kbd></dt><dd>Create and name a child of the selected thought</dd></div><div><dt><kbd>Shift+Tab</kbd></dt><dd>Move the selected thought out one level</dd></div><div><dt><kbd>Enter</kbd></dt><dd>Create and name a sibling</dd></div><div><dt><kbd>F</kbd></dt><dd>Focus or leave the selected branch</dd></div><div><dt><kbd>/</kbd></dt><dd>Search maps and notes</dd></div><div><dt><kbd>Esc</kbd></dt><dd>Close a panel, leave focus, or clear selection</dd></div><div><dt><kbd>Cmd/Ctrl S</kbd></dt><dd>Save the current workspace now</dd></div><div><dt><kbd>Delete</kbd></dt><dd>Remove the selected thought or boundary</dd></div><div><dt><kbd>Cmd/Ctrl Z</kbd></dt><dd>Undo the last workspace change</dd></div><div><dt><kbd>Cmd/Ctrl Shift Z</kbd></dt><dd>Redo the last undone change</dd></div><div><dt><kbd>?</kbd></dt><dd>Open this help</dd></div></dl>
     <h3>Canvas basics</h3><p>Double-click empty canvas space to create a thought there. Drag between connection handles to link thoughts on the same map, or use Linked thoughts to connect any two maps. Enclose branch creates an editable boundary around the selected branch. Files and web links can be dropped into the Media panel.</p>
     <button className="primary-button" onClick={onClose}>Back to the map</button>
   </section></div>;

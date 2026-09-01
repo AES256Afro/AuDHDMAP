@@ -136,3 +136,48 @@ export function formatBytes(bytes: number) {
 export function isPreviewableImage(mime: string) {
   return ["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"].includes(mime);
 }
+
+export function descendantThoughtIds(nodes: ThoughtNode[], mapId: string, rootId: string) {
+  const children = new Map<string, string[]>();
+  for (const node of nodes) {
+    if (node.mapId !== mapId || !node.parentId) continue;
+    const siblings = children.get(node.parentId);
+    if (siblings) siblings.push(node.id);
+    else children.set(node.parentId, [node.id]);
+  }
+  const included = new Set<string>();
+  const pending = [rootId];
+  while (pending.length) {
+    const id = pending.pop()!;
+    if (included.has(id)) continue;
+    included.add(id);
+    for (const childId of children.get(id) ?? []) pending.push(childId);
+  }
+  return included;
+}
+
+export function flattenThoughtHierarchy(nodes: ThoughtNode[]) {
+  const ids = new Set(nodes.map((node) => node.id));
+  const children = new Map<string | null, ThoughtNode[]>();
+  for (const node of nodes) {
+    const parentId = node.parentId && ids.has(node.parentId) ? node.parentId : null;
+    const siblings = children.get(parentId);
+    if (siblings) siblings.push(node);
+    else children.set(parentId, [node]);
+  }
+  const result: { node: ThoughtNode; depth: number }[] = [];
+  const visited = new Set<string>();
+  const append = (roots: ThoughtNode[], depth: number) => {
+    const pending = roots.map((node) => ({ node, depth })).reverse();
+    while (pending.length) {
+      const item = pending.pop()!;
+      if (visited.has(item.node.id)) continue;
+      visited.add(item.node.id); result.push(item);
+      const descendants = children.get(item.node.id) ?? [];
+      for (let index = descendants.length - 1; index >= 0; index -= 1) pending.push({ node: descendants[index], depth: item.depth + 1 });
+    }
+  };
+  append(children.get(null) ?? [], 0);
+  for (const node of nodes) if (!visited.has(node.id)) append([node], 0);
+  return result;
+}

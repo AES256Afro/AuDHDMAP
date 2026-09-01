@@ -1,4 +1,4 @@
-import type { TaskStatus, ThoughtNode, Workspace } from "./model";
+import { flattenThoughtHierarchy, type TaskStatus, type ThoughtNode, type Workspace } from "./model";
 
 interface ViewProps {
   workspace: Workspace;
@@ -16,32 +16,25 @@ function categoryFor(workspace: Workspace, node: ThoughtNode) {
 export function OutlineView(props: ViewProps) {
   const nodes = props.workspace.nodes.filter((node) => node.mapId === props.mapId);
   const nodeIds = new Set(nodes.map((node) => node.id));
-  const children = new Map<string | null, ThoughtNode[]>();
-  for (const node of nodes) children.set(node.parentId, [...(children.get(node.parentId) ?? []), node]);
+  const childrenCount = new Map<string, number>();
+  for (const node of nodes) if (node.parentId) childrenCount.set(node.parentId, (childrenCount.get(node.parentId) ?? 0) + 1);
+  const rows = flattenThoughtHierarchy(nodes);
   const references = props.workspace.edges.filter((edge) => edge.type === "reference" && (nodeIds.has(edge.source) || nodeIds.has(edge.target)));
-
-  function rows(parentId: string | null, depth: number): React.ReactNode {
-    return (children.get(parentId) ?? []).map((node) => {
-      const category = categoryFor(props.workspace, node);
-      return <div key={node.id}>
-        <div className={`outline-row ${props.selectedId === node.id ? "selected" : ""}`} style={{ paddingLeft: `${18 + depth * 28}px` }} onClick={() => props.onSelect(node.id)}>
-          <span className="outline-disclosure">{(children.get(node.id)?.length ?? 0) > 0 ? "⌄" : "•"}</span>
-          <input aria-label={`Title for ${node.title}`} value={node.title} onChange={(event) => props.onTitle(node.id, event.target.value)} />
-          {category && <span className="category-badge" style={{ "--category": category.color } as React.CSSProperties}>{category.icon} {category.name}</span>}
-          {node.task && <span className={`status-badge status-${node.task.status}`}>{node.task.status}</span>}
-        </div>
-        {rows(node.id, depth + 1)}
-      </div>;
-    });
-  }
+  const nodeById = new Map(props.workspace.nodes.map((node) => [node.id, node]));
+  const mapById = new Map(props.workspace.maps.map((map) => [map.id, map]));
 
   return <div className="structured-view outline-view">
     <header><div><span className="eyebrow">Editable outline</span><h2>{props.workspace.maps.find((map) => map.id === props.mapId)?.title}</h2></div><span>{nodes.length} thoughts</span></header>
-    <div className="outline-sheet">{rows(null, 0)}</div>
+    <div className="outline-sheet">{rows.map(({ node, depth }) => { const category = categoryFor(props.workspace, node); return <div className={`outline-row ${props.selectedId === node.id ? "selected" : ""}`} style={{ paddingLeft: `${18 + Math.min(depth, 24) * 28}px` }} onClick={() => props.onSelect(node.id)} key={node.id}>
+      <span className="outline-disclosure">{(childrenCount.get(node.id) ?? 0) > 0 ? "⌄" : "•"}</span>
+      <input aria-label={`Title for ${node.title}`} value={node.title} onChange={(event) => props.onTitle(node.id, event.target.value)} />
+      {category && <span className="category-badge" style={{ "--category": category.color } as React.CSSProperties}>{category.icon} {category.name}</span>}
+      {node.task && <span className={`status-badge status-${node.task.status}`}>{node.task.status}</span>}
+    </div>; })}</div>
     {references.length > 0 && <section className="references-section"><h3>References</h3>{references.map((edge) => {
-      const source = props.workspace.nodes.find((node) => node.id === edge.source); const target = props.workspace.nodes.find((node) => node.id === edge.target);
+      const source = nodeById.get(edge.source); const target = nodeById.get(edge.target);
       const related = source && nodeIds.has(source.id) ? target : source;
-      const relatedMap = props.workspace.maps.find((map) => map.id === related?.mapId);
+      const relatedMap = related ? mapById.get(related.mapId) : undefined;
       return <button key={edge.id} onClick={() => related && props.onSelect(related.id)}><span>↔</span><strong>{source?.title}</strong><span>{edge.label || "references"}</span><strong>{target?.title}<small>{relatedMap?.id !== props.mapId ? relatedMap?.title : ""}</small></strong></button>;
     })}</section>}
     <footer className="shortcut-footer"><kbd>Enter</kbd> sibling <kbd>Tab</kbd> child <kbd>Shift+Tab</kbd> outdent</footer>

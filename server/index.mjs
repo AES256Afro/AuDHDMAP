@@ -9,13 +9,14 @@ const dataDirectory = path.resolve(process.env.AUDHDMAP_DATA_DIR ?? "/data");
 const adminUsername = process.env.AUDHDMAP_ADMIN_USERNAME ?? "owner";
 const adminPassword = process.env.AUDHDMAP_ADMIN_PASSWORD;
 const sessionSecret = process.env.AUDHDMAP_SESSION_SECRET;
+const trustProxy = process.env.AUDHDMAP_TRUST_PROXY === "1" ? 1 : false;
 
 if (!adminPassword) throw new Error("AUDHDMAP_ADMIN_PASSWORD is required.");
-if (!sessionSecret || sessionSecret.length < 16) throw new Error("AUDHDMAP_SESSION_SECRET must contain at least 16 characters.");
+if (!sessionSecret || sessionSecret.length < 32) throw new Error("AUDHDMAP_SESSION_SECRET must contain at least 32 characters.");
 
 const store = createWorkspaceStore({ dataDirectory });
 await store.initialize();
-const app = createApp({ store, adminUsername, adminPassword, sessionSecret, version: packageMetadata.version });
+const app = createApp({ store, adminUsername, adminPassword, sessionSecret, trustProxy, version: packageMetadata.version });
 const server = app.listen(port, host, () => console.log(`AuDHDMAP listening on http://${host}:${port}`));
 
 function shutdown(signal) {

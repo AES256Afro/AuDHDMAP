@@ -4,4 +4,5 @@ dist
 .dev-data
 docs/mockups/*.png
 coverage
+tmp
 *.log

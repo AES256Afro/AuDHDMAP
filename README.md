@@ -4,7 +4,7 @@ AuDHDMAP is a private, self-hosted mind-mapping and note-taking workspace. Captu
 
 ![Signal Garden branch focus](docs/mockups/02-signal-garden-focus.png)
 
-## What works in 0.2.0
+## What works in 0.3.0
 
 - Free pan-and-zoom canvas with draggable nodes, branches, two-way labeled references, editable group boundaries, grid snapping, and explicit tree or grid auto-layout.
 - Strict Branch Focus that shows the selected branch, its ancestors, descendants, and explicit references while hiding unrelated clutter.
@@ -17,8 +17,12 @@ AuDHDMAP is a private, self-hosted mind-mapping and note-taking workspace. Captu
 - Keyboard creation, outdent, deletion, focus, undo, redo, and visible shortcut help.
 - Quiet Canvas, Signal Garden, Amber Operator, Workstation 84, and Paper Atlas themes.
 - Brightness, saturation, branch font, node shape, line weight, reduced motion, and optional CRT effects.
-- Queued autosave with revision-conflict protection, JSON export, validated import, and atomic persistence.
-- Owner authentication, login throttling, secure cookies, response hardening, and custom-header CSRF protection.
+- Queued autosave with visible retry, save-before-export/import/sign-out protection, revision conflicts, undo/redo, and atomic persistence.
+- Complete ZIP backup and staged restore, including every referenced attachment and a SHA-256 integrity manifest.
+- Current-map or focused-branch export to a two-part PDF, scalable SVG, editable Markdown, or plain-text outline. JSON remains available for data-only interchange.
+- Immediate keyboard naming after `N`, `Tab`, or `Enter`, `/` search, `Esc` navigation, and a visible shortcut guide.
+- Owner authentication, bounded login throttling, secure cookies behind an explicitly trusted HTTPS proxy, hardened response headers, attachment signature checks, and custom-header CSRF protection.
+- Measured supported-limit handling for balanced and deeply nested 10,000-node workspaces without recursive outline/export failure.
 
 The detailed interaction contract and post-0.1 scope are in [docs/PRODUCT-DIRECTION.md](docs/PRODUCT-DIRECTION.md).
 
@@ -36,7 +40,11 @@ docker compose up -d --build
 
 Open `http://localhost:3010` and sign in with the username and password from `.env`.
 
-All durable state is stored in the `audhdmap-data` volume at `/data` inside the container. Back up that one volume to capture the workspace database and attachments together.
+All durable state is stored in the `audhdmap-data` volume at `/data` inside the container. Back up that volume for infrastructure-level recovery. The in-app **Export** panel can also create a portable ZIP containing the workspace, all referenced attachment bytes, and integrity checks.
+
+If exactly one trusted reverse proxy terminates HTTPS in front of AuDHDMAP, set `AUDHDMAP_TRUST_PROXY=1`. Leave it at `0` for direct access. Forwarded client and HTTPS headers are ignored by default so a direct client cannot spoof them.
+
+See [Operations and recovery](docs/OPERATIONS.md) for backup drills, restore behavior, upgrades, limits, and troubleshooting. The security boundary is documented in [Security](docs/SECURITY.md).
 
 ## Run for development
 
@@ -54,7 +62,7 @@ The development login is `owner` with password `boxpilot`. Development data is w
 ```sh
 npm run check
 npm audit
-docker build -t audhdmap:0.2.0 .
+docker build -t audhdmap:0.3.0 .
 ```
 
 The health endpoint is available without authentication at `/api/health`. It reports only application version, storage readiness, revision, and bounded object counts. It never returns workspace content.
@@ -63,11 +71,12 @@ The health endpoint is available without authentication at `/api/health`. It rep
 
 The production image is designed for BoxPilot's generic application catalog:
 
-- image: `ghcr.io/aes256afro/audhdmap:0.2.0`
+- image: `ghcr.io/aes256afro/audhdmap:0.3.0`
 - container port: `3010`
 - persistent volume: `/data`
 - required generated secrets: `AUDHDMAP_ADMIN_PASSWORD` and `AUDHDMAP_SESSION_SECRET`
 - optional username: `AUDHDMAP_ADMIN_USERNAME`, default `owner`
+- optional trusted proxy hop: `AUDHDMAP_TRUST_PROXY`, default `0`
 - health: the image's built-in Docker health check against `/api/health`
 
 BoxPilot can install, expose, back up, restore, update, and uninstall AuDHDMAP without app-specific server code.
