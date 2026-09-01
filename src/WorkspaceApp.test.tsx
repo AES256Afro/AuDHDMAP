@@ -167,6 +167,28 @@ describe("workspace daily-use safeguards", () => {
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Export and recovery" })).toBeNull());
   });
 
+  it("keeps keyboard focus inside dialogs and restores the launching control", async () => {
+    render(<WorkspaceApp initialWorkspace={fixture()} username="owner" onSignedOut={() => {}} />);
+    const trigger = screen.getAllByRole("button", { name: /Quick capture/ })[0];
+    trigger.focus();
+    fireEvent.click(trigger);
+    const dialog = await screen.findByRole("dialog", { name: "Quick capture" });
+    const close = within(dialog).getByRole("button", { name: "Close quick capture" });
+    const cancel = within(dialog).getByRole("button", { name: "Cancel" });
+    expect(document.activeElement).toBe(within(dialog).getByRole("textbox", { name: "Thoughts to capture" }));
+
+    cancel.focus();
+    fireEvent.keyDown(cancel, { key: "Tab" });
+    expect(document.activeElement).toBe(close);
+    close.focus();
+    fireEvent.keyDown(close, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(cancel);
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Quick capture" })).toBeNull());
+    expect(document.activeElement).toBe(trigger);
+  });
+
   it("creates and refreshes server-local recovery points", async () => {
     const point = { id: "snapshot-r0-11111111-1111-4111-8111-111111111111", revision: 0, createdAt: "2026-09-01T12:00:00.000Z", thoughts: 1, trashed: 0, attachments: 0 };
     api.listRecoveryPoints.mockResolvedValueOnce({ snapshots: [], problems: [], warning: null }).mockResolvedValue({ snapshots: [point], problems: [], warning: null });

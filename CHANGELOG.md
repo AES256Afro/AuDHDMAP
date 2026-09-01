@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.2
+
+- Keep Tab and Shift+Tab focus inside every active dialog so keyboard navigation cannot disappear behind an open panel.
+- Restore focus to the launching control when a dialog closes, including Escape-driven closure.
+- Add interaction regression coverage for initial dialog focus, forward and reverse wrapping, and focus restoration.
+
 ## 0.6.1
 
 - Authenticate workspace and JSON-import requests before parsing their bodies, preventing anonymous clients from consuming the 8 MiB large-workspace parser allowance.

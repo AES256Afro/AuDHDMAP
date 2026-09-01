@@ -1,7 +1,7 @@
 import DOMPurify from "dompurify";
 import { marked } from "marked";
 import type { ResizeParams } from "@xyflow/react";
-import { ChangeEvent, DragEvent, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, DragEvent, type KeyboardEvent as ReactKeyboardEvent, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import {
   createRecoveryPoint, deleteAttachment, importWorkspace, listRecoveryPoints, logout, mapExportUrl, previewWorkspaceImport,
   purgeTrashedThought, restoreBackup, restoreRecoveryPoint, saveWorkspace, uploadAttachment,
@@ -23,10 +23,42 @@ interface Props {
 type SaveState = "saved" | "unsaved" | "saving" | "failed";
 type PendingImport = { fileName: string; workspace: unknown | null; result: ImportPreviewResult };
 const TRASH_PAGE_SIZE = 100;
+const dialogFocusableSelector = [
+  "a[href]", "button:not([disabled])", "input:not([disabled]):not([type=hidden])", "select:not([disabled])",
+  "textarea:not([disabled])", "[tabindex]:not([tabindex='-1'])",
+].join(",");
 const taskStatuses: { id: TaskStatus; label: string }[] = [
   { id: "todo", label: "Not started" }, { id: "doing", label: "Doing" }, { id: "waiting", label: "Waiting" },
   { id: "blocked", label: "Blocked" }, { id: "done", label: "Done" },
 ];
+
+function useDialogFocus() {
+  const dialogRef = useRef<HTMLElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(document.activeElement instanceof HTMLElement ? document.activeElement : null);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (dialog && !dialog.contains(document.activeElement)) dialog.querySelector<HTMLElement>(dialogFocusableSelector)?.focus();
+    return () => {
+      const target = returnFocusRef.current;
+      if (target?.isConnected) target.focus();
+    };
+  }, []);
+
+  const onDialogKeyDown = useCallback((event: ReactKeyboardEvent<HTMLElement>) => {
+    if (event.key !== "Tab") return;
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    const focusable = [...dialog.querySelectorAll<HTMLElement>(dialogFocusableSelector)]
+      .filter((element) => element.getAttribute("aria-hidden") !== "true");
+    if (!focusable.length) { event.preventDefault(); return; }
+    const first = focusable[0]; const last = focusable.at(-1)!; const active = document.activeElement;
+    if (event.shiftKey && (active === first || !dialog.contains(active))) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && (active === last || !dialog.contains(active))) { event.preventDefault(); first.focus(); }
+  }, []);
+
+  return { dialogRef, onDialogKeyDown };
+}
 
 export function WorkspaceApp({ initialWorkspace, username, onSignedOut }: Props) {
   const [workspace, setWorkspace] = useState(initialWorkspace);
@@ -619,6 +651,7 @@ function QuickSwitcher({ workspace, recentLocations, onThought, onMap, onClose }
   onMap: (id: string) => void;
   onClose: () => void;
 }) {
+  const { dialogRef, onDialogKeyDown } = useDialogFocus();
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const candidates = useMemo(() => {
@@ -673,7 +706,7 @@ function QuickSwitcher({ workspace, recentLocations, onThought, onMap, onClose }
     else if (result?.mapId) onMap(result.mapId);
   }
 
-  return <div className="dialog-backdrop switcher-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="quick-switcher" role="dialog" aria-modal="true" aria-labelledby="switcher-title">
+  return <div className="dialog-backdrop switcher-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section ref={dialogRef} onKeyDown={onDialogKeyDown} className="quick-switcher" role="dialog" aria-modal="true" aria-labelledby="switcher-title">
     <header><div><span className="eyebrow">Keyboard navigation</span><h2 id="switcher-title">Jump anywhere</h2></div><kbd>⌘ K</kbd></header>
     <label className="switcher-search"><span>⌕</span><input autoFocus aria-label="Search maps, thoughts, and tasks" aria-controls="switcher-results" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => {
       if (event.key === "ArrowDown" && results.length) { event.preventDefault(); setActiveIndex((index) => (index + 1) % results.length); }
@@ -694,10 +727,11 @@ function QuickSwitcher({ workspace, recentLocations, onThought, onMap, onClose }
 }
 
 function QuickCaptureDialog({ onCapture, onClose }: { onCapture: (titles: string[]) => void; onClose: () => void }) {
+  const { dialogRef, onDialogKeyDown } = useDialogFocus();
   const [draft, setDraft] = useState("");
   const titles = draft.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   const accepted = titles.slice(0, 100);
-  return <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="quick-capture-dialog" role="dialog" aria-modal="true" aria-labelledby="quick-capture-title">
+  return <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section ref={dialogRef} onKeyDown={onDialogKeyDown} className="quick-capture-dialog" role="dialog" aria-modal="true" aria-labelledby="quick-capture-title">
     <header><div><span className="eyebrow">Thoughts first, structure later</span><h2 id="quick-capture-title">Quick capture</h2></div><button aria-label="Close quick capture" onClick={onClose}>×</button></header>
     <p>Put one thought on each line. AuDHDMAP will add them as a clean, unconnected batch on the current map.</p>
     <textarea autoFocus aria-label="Thoughts to capture" value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => {
@@ -715,13 +749,14 @@ function TrashDialog({ nodes, maps, purgingId, onRestore, onPurge, onClose }: {
   onPurge: (id: string) => Promise<void>;
   onClose: () => void;
 }) {
+  const { dialogRef, onDialogKeyDown } = useDialogFocus();
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [visibleCount, setVisibleCount] = useState(TRASH_PAGE_SIZE);
   const mapById = new Map(maps.map((map) => [map.id, map]));
   const ordered = [...nodes].sort((left, right) => (right.trashedAt ?? "").localeCompare(left.trashedAt ?? ""));
   const visible = ordered.slice(0, visibleCount);
   useEffect(() => { if (confirmId && !nodes.some((node) => node.id === confirmId)) setConfirmId(null); }, [confirmId, nodes]);
-  return <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && !purgingId && onClose()}><section className="trash-dialog" role="dialog" aria-modal="true" aria-labelledby="trash-title">
+  return <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && !purgingId && onClose()}><section ref={dialogRef} onKeyDown={onDialogKeyDown} className="trash-dialog" role="dialog" aria-modal="true" aria-labelledby="trash-title">
     <header><div><span className="eyebrow">Recoverable by default</span><h2 id="trash-title">Trash</h2></div><button autoFocus aria-label="Close trash" disabled={Boolean(purgingId)} onClick={onClose}>×</button></header>
     <p>Trashed thoughts stay out of maps, search, projects, and ordinary exports. Complete ZIP backups still include them and their attachments.</p>
     {ordered.length === 0 ? <div className="trash-empty"><span>♲</span><strong>Trash is empty</strong><small>Deleting a thought moves it here first.</small></div> : <><div className="trash-list">{visible.map((node) => <article key={node.id}>
@@ -743,12 +778,13 @@ function ImportPreviewDialog({ pending, importing, onConfirm, onClose, onChooseA
   onClose: () => void;
   onChooseAnother: () => void;
 }) {
+  const { dialogRef, onDialogKeyDown } = useDialogFocus();
   const labels = {
     maps: "Maps", thoughts: "Thoughts", connections: "Connections", boundaries: "Boundaries",
     categories: "Categories", attachments: "Attachment references",
   } as const;
   const ready = pending.result.status === "ready" ? pending.result : null;
-  return <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && !importing && onClose()}><section className="import-dialog" role="dialog" aria-modal="true" aria-labelledby="import-preview-title">
+  return <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && !importing && onClose()}><section ref={dialogRef} onKeyDown={onDialogKeyDown} className="import-dialog" role="dialog" aria-modal="true" aria-labelledby="import-preview-title">
     <header><div><span className="eyebrow">Review before replacement</span><h2 id="import-preview-title">JSON import preview</h2></div><button autoFocus aria-label="Close import preview" disabled={importing} onClick={onClose}>×</button></header>
     <div className={`import-file-status ${ready ? "ready" : "rejected"}`} role="status">
       <span>{ready ? "✓ READY" : "× REJECTED"}</span><div><strong>{pending.fileName}</strong><small>{ready ? `Validated for revision ${ready.preview.currentRevision}` : pending.result.status === "rejected" ? pending.result.error : "Import rejected."}</small></div>
@@ -786,6 +822,7 @@ function ExportDialog({ workspace, mapId, focusId, restoring, onRestore, onResto
   onRestoreRecoveryPoint: (id: string) => Promise<void>;
   onClose: () => void;
 }) {
+  const { dialogRef, onDialogKeyDown } = useDialogFocus();
   const [backup, setBackup] = useState<File | null>(null);
   const [recoveryPoints, setRecoveryPoints] = useState<RecoveryPointList | null>(null);
   const [recoveryError, setRecoveryError] = useState("");
@@ -817,7 +854,7 @@ function ExportDialog({ workspace, mapId, focusId, restoring, onRestore, onResto
     finally { setRecoveryBusy(""); }
   }
 
-  return <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && !busy && onClose()}><section className="export-dialog" role="dialog" aria-modal="true" aria-labelledby="export-title">
+  return <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && !busy && onClose()}><section ref={dialogRef} onKeyDown={onDialogKeyDown} className="export-dialog" role="dialog" aria-modal="true" aria-labelledby="export-title">
     <header><div><span className="eyebrow">Portable by design</span><h2 id="export-title">Export and recovery</h2></div><button autoFocus aria-label="Close export" disabled={busy} onClick={onClose}>×</button></header>
     <section className="export-section"><div className="export-heading"><div><h3>Share what you see</h3><p>{scope}. PDF includes a visual overview and readable outline.</p></div><span>{focus ? "BRANCH" : "MAP"}</span></div>
       <div className="export-grid">
@@ -944,8 +981,9 @@ function BoundaryInspector({ group, updateGroup, deleteGroup }: {
 }
 
 function VisualSettings({ settings, onChange, onClose }: { settings: WorkspaceSettings; onChange: (patch: Partial<WorkspaceSettings>) => void; onClose: () => void }) {
+  const { dialogRef, onDialogKeyDown } = useDialogFocus();
   function reset() { onChange({ theme: "quiet", snapToGrid: true, gridSize: 16, reducedMotion: false, crtEffects: true, brightness: 100, saturation: 100, lineThickness: 2, branchFont: "system", nodeShape: "rounded" }); }
-  return <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title"><header><div><span className="eyebrow">Workspace appearance</span><h2 id="settings-title">Visual settings</h2></div><button autoFocus aria-label="Close settings" onClick={onClose}>×</button></header>
+  return <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section ref={dialogRef} onKeyDown={onDialogKeyDown} className="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title"><header><div><span className="eyebrow">Workspace appearance</span><h2 id="settings-title">Visual settings</h2></div><button autoFocus aria-label="Close settings" onClick={onClose}>×</button></header>
     <label>Theme<select value={settings.theme} onChange={(event) => onChange({ theme: event.target.value as WorkspaceSettings["theme"] })}>{Object.entries(themeLabels).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>
     <fieldset><legend>Node shape</legend><div className="shape-options">{(["rounded", "square", "pill", "oval"] as const).map((shape) => <button className={settings.nodeShape === shape ? "active" : ""} key={shape} onClick={() => onChange({ nodeShape: shape })}><i className={`shape-${shape}`} /><span>{shape}</span></button>)}</div></fieldset>
     <label>Branch font<select value={settings.branchFont} onChange={(event) => onChange({ branchFont: event.target.value as WorkspaceSettings["branchFont"] })}><option value="system">System sans</option><option value="mono">Terminal mono</option><option value="serif">Readable serif</option></select></label>
@@ -964,7 +1002,8 @@ function Range({ label, value, min, max, onChange }: { label: string; value: num
 }
 
 function HelpDialog({ onClose }: { onClose: () => void }) {
-  return <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="help-dialog" role="dialog" aria-modal="true" aria-labelledby="help-title"><header><div><span className="eyebrow">Nothing hidden</span><h2 id="help-title">Help and shortcuts</h2></div><button autoFocus aria-label="Close help" onClick={onClose}>×</button></header>
+  const { dialogRef, onDialogKeyDown } = useDialogFocus();
+  return <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section ref={dialogRef} onKeyDown={onDialogKeyDown} className="help-dialog" role="dialog" aria-modal="true" aria-labelledby="help-title"><header><div><span className="eyebrow">Nothing hidden</span><h2 id="help-title">Help and shortcuts</h2></div><button autoFocus aria-label="Close help" onClick={onClose}>×</button></header>
     <p>Buttons remain available when you do not want to use the keyboard. Most shortcuts are ignored while you are typing in a field.</p>
     <dl><div><dt><kbd>Cmd/Ctrl K</kbd></dt><dd>Jump to any map, thought, or task</dd></div><div><dt><kbd>N</kbd></dt><dd>Create and immediately name an unconnected thought</dd></div><div><dt><kbd>Q</kbd></dt><dd>Capture several unconnected thoughts, one per line</dd></div><div><dt><kbd>Tab</kbd></dt><dd>Create and name a child of the selected thought</dd></div><div><dt><kbd>Shift+Tab</kbd></dt><dd>Move the selected thought out one level</dd></div><div><dt><kbd>Enter</kbd></dt><dd>Create and name a sibling</dd></div><div><dt><kbd>F</kbd></dt><dd>Focus or leave the selected branch</dd></div><div><dt><kbd>/</kbd></dt><dd>Search maps and notes</dd></div><div><dt><kbd>Esc</kbd></dt><dd>Close a panel, leave focus, or clear selection</dd></div><div><dt><kbd>Cmd/Ctrl S</kbd></dt><dd>Save the current workspace now</dd></div><div><dt><kbd>Delete</kbd></dt><dd>Move the selected thought to trash or remove a boundary</dd></div><div><dt><kbd>Cmd/Ctrl Z</kbd></dt><dd>Undo the last workspace change</dd></div><div><dt><kbd>Cmd/Ctrl Shift Z</kbd></dt><dd>Redo the last undone change</dd></div><div><dt><kbd>?</kbd></dt><dd>Open this help</dd></div></dl>
     <h3>Canvas basics</h3><p>Double-click empty canvas space to create a thought there. Drag between connection handles to link thoughts on the same map, or use Linked thoughts to connect any two maps. Enclose branch creates an editable boundary around the selected branch. Files and web links can be dropped into the Media panel.</p>

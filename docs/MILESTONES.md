@@ -69,6 +69,15 @@ Acceptance criteria:
 - Import confirmation is bound to the exact previewed payload and current revision. The server validates both again and requires a recovery point before replacement.
 - Checked-in JSON and CSV fixtures, API tests, UI tests, and the supported-limit benchmark cover compatibility and the full preview-confirm path.
 
+## 0.6.1 and 0.6.2 - Hardened daily interaction
+
+Status: shipped
+
+- Authentication runs before the large workspace and import body parser, while login and small mutations retain a separate 64 KiB ceiling.
+- Malformed and oversized JSON receives a bounded response, and large authenticated workspace saves retain the documented 8 MiB allowance.
+- Every modal dialog contains forward and reverse keyboard focus within the active panel and returns focus to its launching control when it closes.
+- API and interaction regression tests cover parser order, both body ceilings, malformed JSON, focus containment, and focus restoration.
+
 ## Later gates
 
 Collaboration, cloud synchronization, OCR, speech capture, and automated link retrieval remain outside the core until local recovery, export stability, and large-map performance are proven. These features must not weaken offline ownership or make a third-party account mandatory.
