@@ -1,0 +1,7 @@
+node_modules
+dist
+.git
+.dev-data
+docs/mockups/*.png
+coverage
+*.log

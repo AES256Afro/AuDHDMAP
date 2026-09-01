@@ -1,0 +1,40 @@
+{
+  "name": "audhdmap",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Private, self-hosted visual thinking and note-taking workspace.",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "dev": "concurrently -k -n web,server \"vite --host 127.0.0.1\" \"AUDHDMAP_DATA_DIR=.dev-data AUDHDMAP_ADMIN_PASSWORD=boxpilot AUDHDMAP_SESSION_SECRET=development-only-secret node --watch server/index.mjs\"",
+    "build": "tsc -b && vite build",
+    "start": "node server/index.mjs",
+    "test": "vitest run",
+    "check": "npm run build && npm run test && npm run check:syntax",
+    "check:syntax": "find server -name '*.mjs' -print0 | xargs -0 -n 1 node --check"
+  },
+  "dependencies": {
+    "@xyflow/react": "12.11.6",
+    "dompurify": "3.4.14",
+    "express": "5.2.1",
+    "marked": "18.0.11",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "6.9.1",
+    "@testing-library/react": "16.3.2",
+    "@types/express": "5.0.6",
+    "@types/node": "24.10.4",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.1.1",
+    "concurrently": "9.2.4",
+    "jsdom": "30.0.1",
+    "typescript": "7.0.2",
+    "vite": "8.2.2",
+    "vitest": "4.1.11"
+  }
+}

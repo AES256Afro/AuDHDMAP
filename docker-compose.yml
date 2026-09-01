@@ -1,0 +1,21 @@
+services:
+  audhdmap:
+    image: ghcr.io/aes256afro/audhdmap:0.1.0
+    build:
+      context: .
+    restart: unless-stopped
+    ports:
+      - "3010:3010"
+    environment:
+      AUDHDMAP_ADMIN_USERNAME: ${AUDHDMAP_ADMIN_USERNAME:-owner}
+      AUDHDMAP_ADMIN_PASSWORD: ${AUDHDMAP_ADMIN_PASSWORD:?Set AUDHDMAP_ADMIN_PASSWORD in .env}
+      AUDHDMAP_SESSION_SECRET: ${AUDHDMAP_SESSION_SECRET:?Set AUDHDMAP_SESSION_SECRET in .env}
+    volumes:
+      - audhdmap-data:/data
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+volumes:
+  audhdmap-data:
