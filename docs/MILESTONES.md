@@ -69,7 +69,7 @@ Acceptance criteria:
 - Import confirmation is bound to the exact previewed payload and current revision. The server validates both again and requires a recovery point before replacement.
 - Checked-in JSON and CSV fixtures, API tests, UI tests, and the supported-limit benchmark cover compatibility and the full preview-confirm path.
 
-## 0.6.1 through 0.6.3 - Hardened daily interaction
+## 0.6.1 through 0.6.4 - Hardened daily interaction
 
 Status: shipped
 
@@ -77,7 +77,8 @@ Status: shipped
 - Malformed and oversized JSON receives a bounded response, and large authenticated workspace saves retain the documented 8 MiB allowance.
 - Every modal dialog contains forward and reverse keyboard focus within the active panel and returns focus to its launching control when it closes.
 - Malformed cookie encoding fails closed, public health failures hide internal error details, and Unicode attachment names survive safe request and download headers.
-- API and interaction regression tests cover parser order, both body ceilings, malformed JSON and cookies, bounded health failures, Unicode filenames, focus containment, and focus restoration.
+- Existing workspace access failures stop startup without replacing stored data; only a truly absent file receives the initial seed workspace.
+- API and interaction regression tests cover parser order, both body ceilings, malformed JSON and cookies, bounded health failures, Unicode filenames, fail-closed startup, focus containment, and focus restoration.
 
 ## Later gates
 

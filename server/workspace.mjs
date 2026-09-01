@@ -351,7 +351,12 @@ export function createWorkspaceStore({ dataDirectory, now = () => new Date(), sn
     await recoverInterruptedRestore();
     await mkdir(attachmentDirectory, { recursive: true, mode: 0o700 });
     try { await access(workspacePath, constants.R_OK | constants.W_OK); }
-    catch { await writeAtomic(defaultWorkspace(now())); }
+    catch (error) {
+      if (error?.code !== "ENOENT") {
+        throw new Error("AuDHDMAP found an existing workspace that is not readable and writable. Preserve the data directory and repair its ownership, permissions, or storage before starting.", { cause: error });
+      }
+      await writeAtomic(defaultWorkspace(now()));
+    }
     const stored = JSON.parse(await readFile(workspacePath, "utf8"));
     const clean = normalizeWorkspace(stored, { revision: Number.isInteger(stored.revision) ? stored.revision : 0 });
     await writeAtomic(clean);

@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -119,6 +119,18 @@ describe("workspace normalization", () => {
 });
 
 describe("workspace store", () => {
+  it("never replaces an existing workspace when its permissions block access", async () => {
+    const dataDirectory = await mkdtemp(path.join(os.tmpdir(), "audhdmap-permissions-")); directories.push(dataDirectory);
+    const workspacePath = path.join(dataDirectory, "workspace.json");
+    const original = `${JSON.stringify(defaultWorkspace(new Date("2026-09-01T12:00:00.000Z")))}\n`;
+    await writeFile(workspacePath, original, { mode: 0o600 });
+    await chmod(workspacePath, 0o000);
+    const store = createWorkspaceStore({ dataDirectory });
+    await expect(store.initialize()).rejects.toThrow(/existing workspace.*not readable and writable/i);
+    await chmod(workspacePath, 0o600);
+    expect(await readFile(workspacePath, "utf8")).toBe(original);
+  });
+
   it("initializes once, writes atomically, and persists revisions", async () => {
     const store = await tempStore();
     const first = await store.read();

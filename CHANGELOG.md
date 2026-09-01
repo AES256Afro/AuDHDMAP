@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.4
+
+- Create the seed workspace only when `workspace.json` is truly absent.
+- Fail closed with preservation and repair guidance when an existing workspace cannot be read and written, instead of treating every access error like a missing file.
+- Add a filesystem-permission regression proving that blocked startup leaves the original workspace bytes unchanged.
+
 ## 0.6.3
 
 - Treat malformed percent-encoded session cookies as invalid anonymous sessions instead of returning a server error.

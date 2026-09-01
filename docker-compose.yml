@@ -1,6 +1,6 @@
 services:
   audhdmap:
-    image: ghcr.io/aes256afro/audhdmap:0.6.3
+    image: ghcr.io/aes256afro/audhdmap:0.6.4
     build:
       context: .
     restart: unless-stopped

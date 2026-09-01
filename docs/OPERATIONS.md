@@ -125,7 +125,7 @@ docker compose ps
 
 Avoid relying on the moving `edge` tag for a controlled installation. Use the catalog's versioned image.
 
-## Limits in 0.6.3
+## Limits in 0.6.4
 
 - 200 maps
 - 10,000 thoughts
@@ -148,7 +148,7 @@ Recovery-point storage depends on filesystem support. Hard-linked immutable atta
 
 ## Troubleshooting
 
-**The app refuses to start:** check that the owner password is at least 8 characters, the session secret is at least 32 characters, and `/data` is writable by the container's non-root user.
+**The app refuses to start:** check that the owner password is at least 8 characters, the session secret is at least 32 characters, and `/data` is writable by the container's non-root user. If the message says an existing workspace is not readable and writable, preserve the complete data directory first, then repair ownership, permissions, or the underlying storage. AuDHDMAP will not replace that file with seed data.
 
 **A backup returns a conflict:** a referenced attachment is missing or differs from its metadata. Preserve `/data`, identify the named attachment, and repair the data before treating any new archive as complete.
 

@@ -2,7 +2,7 @@
 
 ## Intended boundary
 
-AuDHDMAP 0.6.3 is a private, single-owner application. It is suitable for a trusted individual or household behind BoxPilot, a private network, a VPN, or a carefully configured HTTPS reverse proxy. It is not a multi-tenant collaboration service and does not implement per-map roles, public sharing, or anonymous write access.
+AuDHDMAP 0.6.4 is a private, single-owner application. It is suitable for a trusted individual or household behind BoxPilot, a private network, a VPN, or a carefully configured HTTPS reverse proxy. It is not a multi-tenant collaboration service and does not implement per-map roles, public sharing, or anonymous write access.
 
 ## Controls in this release
 
@@ -23,6 +23,7 @@ AuDHDMAP 0.6.3 is a private, single-owner application. It is suitable for a trus
 - Workspace and JSON import bodies are capped at 8 MiB and are authenticated before parsing. Login and small mutation bodies use a separate 64 KiB ceiling. JSON import must pass a non-mutating preview; confirmation is SHA-256-bound to the exact candidate and expected revision, then checked again inside the serialized mutation queue. Missing, mismatched, non-regular, or symlinked attachment bytes block import with guidance to use a complete ZIP.
 - Confirmed JSON import requires a valid recovery point for the current revision before its atomic replacement write. Attachment bytes removed from imported metadata are deleted from the current directory only after that commit; retained recovery points may still hold them. Rejected, tampered, unpreviewed, and stale candidates leave the workspace unchanged.
 - Persistence uses private permissions, unique temporary files, atomic workspace renames, revision checks, a serialized mutation queue, and crash recovery for the restore swap.
+- Startup creates seed data only when `workspace.json` is truly absent. An existing workspace that cannot be read and written stops startup without replacing the file.
 - Thought deletion is recoverable by default. Permanent deletion is accepted only for an already-trashed record at the current revision; metadata commits before attachment bytes are removed, and in-tab history is cleared so undo cannot resurrect dangling metadata.
 - Server recovery points use a fixed identifier format, private directories, fixed top-level layout, regular-file and symlink checks, manifest and revision matching, normalized workspace data, exact attachment inventory and size validation, atomic staging, and bounded retention.
 - Permanent thought deletion, attachment deletion, and both restore paths fail closed unless the current revision has a valid recovery point. Recovery restore itself remains revision checked and uses the crash-recoverable attachment swap.

@@ -4,7 +4,7 @@ AuDHDMAP is a private, self-hosted mind-mapping and note-taking workspace. Captu
 
 ![Signal Garden branch focus](docs/mockups/02-signal-garden-focus.png)
 
-## What works in 0.6.3
+## What works in 0.6.4
 
 - Free pan-and-zoom canvas with draggable nodes, branches, two-way labeled references, editable group boundaries, grid snapping, and explicit tree or grid auto-layout.
 - Strict Branch Focus that shows the selected branch, its ancestors, descendants, and explicit references while hiding unrelated clutter.
@@ -18,7 +18,7 @@ AuDHDMAP is a private, self-hosted mind-mapping and note-taking workspace. Captu
 - Global `Cmd/Ctrl+K` navigation across maps, thoughts, tags, and tasks, with arrow-key selection and tab-local recent locations.
 - Quiet Canvas, Signal Garden, Amber Operator, Workstation 84, and Paper Atlas themes.
 - Brightness, saturation, branch font, node shape, line weight, reduced motion, and optional CRT effects.
-- Queued autosave with visible retry, save-before-export/import/sign-out protection, revision conflicts, undo/redo, and atomic persistence.
+- Queued autosave with visible retry, save-before-export/import/sign-out protection, revision conflicts, undo/redo, atomic persistence, and fail-closed startup when an existing workspace cannot be accessed safely.
 - Complete ZIP backup and staged restore, including every referenced attachment and a SHA-256 integrity manifest.
 - Up to 10 server-local recovery points with manual capture, automatic pre-change capture, and fail-closed safety capture before permanent deletion or restore.
 - Current-map or focused-branch export to a two-part PDF, scalable SVG, editable Markdown, plain-text outline, or spreadsheet-safe project CSV. CSV preserves stable IDs, hierarchy paths, task fields, notes, links, attachment metadata, and labeled references.
@@ -69,7 +69,7 @@ The development login is `owner` with password `boxpilot`. Development data is w
 ```sh
 npm run check
 npm audit
-docker build -t audhdmap:0.6.3 .
+docker build -t audhdmap:0.6.4 .
 ```
 
 The health endpoint is available without authentication at `/api/health`. It reports only application version, storage readiness, revision, bounded object counts, and recovery-point health counts. It never returns workspace content, filenames, point identifiers, or error details.
@@ -78,7 +78,7 @@ The health endpoint is available without authentication at `/api/health`. It rep
 
 The production image is designed for BoxPilot's generic application catalog:
 
-- image: `ghcr.io/aes256afro/audhdmap:0.6.3`
+- image: `ghcr.io/aes256afro/audhdmap:0.6.4`
 - container port: `3010`
 - persistent volume: `/data`
 - required generated secrets: `AUDHDMAP_ADMIN_PASSWORD` and `AUDHDMAP_SESSION_SECRET`
