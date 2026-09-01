@@ -71,6 +71,20 @@ describe("AuDHDMAP API", () => {
     expect((await fetch(`${base}/api/attachments/${attachment.id}`, { headers: { cookie } })).status).toBe(404);
   });
 
+  it("forces active image formats to download instead of executing at the app origin", async () => {
+    const { base } = await setup(); const { cookie } = await signIn(base);
+    const uploaded = await fetch(`${base}/api/attachments`, { method: "POST", headers: { cookie, "content-type": "application/octet-stream", "x-audhdmap-request": "1", "x-file-name": "unsafe.svg", "x-file-type": "image/svg+xml" }, body: "<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script></svg>" });
+    const attachment = await uploaded.json();
+    const workspace = await (await fetch(`${base}/api/workspace`, { headers: { cookie } })).json();
+    workspace.nodes[0].attachments.push(attachment);
+    const saved = await fetch(`${base}/api/workspace`, { method: "PUT", headers: { cookie, "content-type": "application/json", "x-audhdmap-request": "1" }, body: JSON.stringify({ workspace, expectedRevision: 0 }) });
+    expect(saved.status).toBe(200);
+    const response = await fetch(`${base}/api/attachments/${attachment.id}`, { headers: { cookie } });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("application/octet-stream");
+    expect(response.headers.get("content-disposition")).toMatch(/^attachment;/);
+  });
+
   it("rejects an invalid import without changing the current revision", async () => {
     const { base, store } = await setup(); const { cookie } = await signIn(base);
     const response = await fetch(`${base}/api/import`, { method: "POST", headers: { cookie, "content-type": "application/json", "x-audhdmap-request": "1" }, body: JSON.stringify({ expectedRevision: 0, workspace: { schemaVersion: 999 } }) });

@@ -15,10 +15,10 @@ function categoryFor(workspace: Workspace, node: ThoughtNode) {
 
 export function OutlineView(props: ViewProps) {
   const nodes = props.workspace.nodes.filter((node) => node.mapId === props.mapId);
+  const nodeIds = new Set(nodes.map((node) => node.id));
   const children = new Map<string | null, ThoughtNode[]>();
   for (const node of nodes) children.set(node.parentId, [...(children.get(node.parentId) ?? []), node]);
-  const branchEdgeIds = new Set(props.workspace.edges.filter((edge) => edge.mapId === props.mapId && edge.type === "branch").map((edge) => `${edge.source}:${edge.target}`));
-  const references = props.workspace.edges.filter((edge) => edge.mapId === props.mapId && edge.type === "reference");
+  const references = props.workspace.edges.filter((edge) => edge.type === "reference" && (nodeIds.has(edge.source) || nodeIds.has(edge.target)));
 
   function rows(parentId: string | null, depth: number): React.ReactNode {
     return (children.get(parentId) ?? []).map((node) => {
@@ -39,8 +39,10 @@ export function OutlineView(props: ViewProps) {
     <header><div><span className="eyebrow">Editable outline</span><h2>{props.workspace.maps.find((map) => map.id === props.mapId)?.title}</h2></div><span>{nodes.length} thoughts</span></header>
     <div className="outline-sheet">{rows(null, 0)}</div>
     {references.length > 0 && <section className="references-section"><h3>References</h3>{references.map((edge) => {
-      const source = nodes.find((node) => node.id === edge.source); const target = nodes.find((node) => node.id === edge.target);
-      return <button key={edge.id} onClick={() => target && props.onSelect(target.id)}><span>↗</span><strong>{source?.title}</strong><span>{edge.label || "references"}</span><strong>{target?.title}</strong></button>;
+      const source = props.workspace.nodes.find((node) => node.id === edge.source); const target = props.workspace.nodes.find((node) => node.id === edge.target);
+      const related = source && nodeIds.has(source.id) ? target : source;
+      const relatedMap = props.workspace.maps.find((map) => map.id === related?.mapId);
+      return <button key={edge.id} onClick={() => related && props.onSelect(related.id)}><span>↔</span><strong>{source?.title}</strong><span>{edge.label || "references"}</span><strong>{target?.title}<small>{relatedMap?.id !== props.mapId ? relatedMap?.title : ""}</small></strong></button>;
     })}</section>}
     <footer className="shortcut-footer"><kbd>Enter</kbd> sibling <kbd>Tab</kbd> child <kbd>Shift+Tab</kbd> outdent</footer>
   </div>;

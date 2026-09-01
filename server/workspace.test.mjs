@@ -43,6 +43,35 @@ describe("workspace normalization", () => {
     expect(clean.nodes[0].parentId).toBeNull();
     expect(clean.nodes[1].task).toMatchObject({ status: "todo", progress: 100 });
   });
+
+  it("keeps safe web links and rejects unsafe URL schemes", () => {
+    const raw = defaultWorkspace();
+    raw.nodes[0].links = [
+      { id: "link-safe", url: "https://example.com/notes", title: "Reference", createdAt: "2026-09-01T12:00:00.000Z" },
+      { id: "link-script", url: "javascript:alert(1)", title: "Unsafe", createdAt: "2026-09-01T12:00:00.000Z" },
+      { id: "bad id", url: "https://example.com", title: "Bad id", createdAt: "2026-09-01T12:00:00.000Z" },
+    ];
+    const clean = normalizeWorkspace(raw);
+    expect(clean.nodes[0].links).toEqual([{ id: "link-safe", url: "https://example.com/notes", title: "Reference", createdAt: "2026-09-01T12:00:00.000Z" }]);
+  });
+
+  it("allows references across maps but never branch edges across maps", () => {
+    const raw = defaultWorkspace();
+    raw.edges.push({ id: "edge-cross-map", mapId: "map-home-server", source: "node-root", target: "node-inbox", type: "reference", label: "capture" });
+    const clean = normalizeWorkspace(raw);
+    expect(clean.edges.find((edge) => edge.id === "edge-cross-map")).toMatchObject({ mapId: "map-home-server", type: "reference" });
+    raw.edges.at(-1).type = "branch";
+    expect(() => normalizeWorkspace(raw)).toThrow(/cannot cross maps/i);
+  });
+
+  it("keeps boundary descriptions and repairs unknown group membership", () => {
+    const raw = defaultWorkspace();
+    raw.groups[0].description = "A bounded preparation area";
+    raw.nodes[0].groupId = "missing-group";
+    const clean = normalizeWorkspace(raw);
+    expect(clean.groups[0].description).toBe("A bounded preparation area");
+    expect(clean.nodes[0].groupId).toBeNull();
+  });
 });
 
 describe("workspace store", () => {

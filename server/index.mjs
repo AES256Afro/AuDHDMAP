@@ -1,4 +1,5 @@
 import path from "node:path";
+import packageMetadata from "../package.json" with { type: "json" };
 import { createApp } from "./app.mjs";
 import { createWorkspaceStore } from "./workspace.mjs";
 
@@ -14,7 +15,7 @@ if (!sessionSecret || sessionSecret.length < 16) throw new Error("AUDHDMAP_SESSI
 
 const store = createWorkspaceStore({ dataDirectory });
 await store.initialize();
-const app = createApp({ store, adminUsername, adminPassword, sessionSecret });
+const app = createApp({ store, adminUsername, adminPassword, sessionSecret, version: packageMetadata.version });
 const server = app.listen(port, host, () => console.log(`AuDHDMAP listening on http://${host}:${port}`));
 
 function shutdown(signal) {

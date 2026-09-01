@@ -24,6 +24,16 @@ function validDate(value) {
   return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : "";
 }
 
+function validWebUrl(value) {
+  if (typeof value !== "string" || value.length > 2_048) return "";
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : "";
+  } catch {
+    return "";
+  }
+}
+
 export function normalizeWorkspace(raw, { revision = 0 } = {}) {
   if (!plainObject(raw)) throw new Error("Workspace must be an object.");
   if (raw.schemaVersion !== 1) throw new Error("Unsupported workspace schema version.");
@@ -68,6 +78,12 @@ export function normalizeWorkspace(raw, { revision = 0 } = {}) {
       size: finite(attachment?.size, 0, 0, 25 * 1024 * 1024),
       createdAt: shortString(attachment?.createdAt, 40, new Date().toISOString()),
     })).filter((attachment) => idPattern.test(attachment.id)) : [];
+    const links = Array.isArray(node?.links) ? node.links.slice(0, 100).map((link) => ({
+      id: shortString(link?.id, 96),
+      url: validWebUrl(link?.url),
+      title: shortString(link?.title, 240, "Web link").trim() || "Web link",
+      createdAt: shortString(link?.createdAt, 40, new Date().toISOString()),
+    })).filter((link) => idPattern.test(link.id) && link.url) : [];
     const task = plainObject(node?.task) ? {
       status: statuses.has(node.task.status) ? node.task.status : "todo",
       start: validDate(node.task.start),
@@ -87,7 +103,7 @@ export function normalizeWorkspace(raw, { revision = 0 } = {}) {
       shape: ["rounded", "square", "pill", "oval"].includes(node.shape) ? node.shape : "rounded",
       categoryId: categoryIds.has(node.categoryId) ? node.categoryId : null,
       tags: Array.isArray(node.tags) ? node.tags.slice(0, 30).map((tag) => shortString(tag, 40)).filter(Boolean) : [],
-      attachments, task,
+      attachments, links, task,
       createdAt: shortString(node.createdAt, 40, new Date().toISOString()),
       updatedAt: shortString(node.updatedAt, 40, new Date().toISOString()),
     };
@@ -97,10 +113,15 @@ export function normalizeWorkspace(raw, { revision = 0 } = {}) {
     if (node.parentId === node.id) node.parentId = null;
   }
 
+  const nodeMapIds = new Map(cleanNodes.map((node) => [node.id, node.mapId]));
   const cleanEdges = edges.map((edge) => {
     const id = takeId(edge?.id, "Edge");
     if (!mapIds.has(edge?.mapId) || !nodeIds.has(edge?.source) || !nodeIds.has(edge?.target)) throw new Error(`Edge ${id} has an unknown endpoint.`);
-    return { id, mapId: edge.mapId, source: edge.source, target: edge.target, type: edge.type === "reference" ? "reference" : "branch", label: shortString(edge.label, 100) };
+    const sourceMapId = nodeMapIds.get(edge.source);
+    const targetMapId = nodeMapIds.get(edge.target);
+    const type = edge.type === "reference" ? "reference" : "branch";
+    if (type === "branch" && sourceMapId !== targetMapId) throw new Error(`Branch edge ${id} cannot cross maps.`);
+    return { id, mapId: sourceMapId, source: edge.source, target: edge.target, type, label: shortString(edge.label, 100) };
   });
 
   const cleanGroups = groups.map((group) => {
@@ -108,6 +129,7 @@ export function normalizeWorkspace(raw, { revision = 0 } = {}) {
     if (!mapIds.has(group?.mapId)) throw new Error(`Group ${id} belongs to an unknown map.`);
     return {
       id, mapId: group.mapId, title: shortString(group.title, 120, "Group"),
+      description: shortString(group.description, 1_000),
       x: finite(group.x, 0, -100_000, 100_000), y: finite(group.y, 0, -100_000, 100_000),
       width: finite(group.width, 400, 180, 10_000), height: finite(group.height, 260, 120, 10_000),
       color: hexColor.test(group.color) ? group.color : "#47b6a8",
@@ -115,6 +137,10 @@ export function normalizeWorkspace(raw, { revision = 0 } = {}) {
       collapsed: Boolean(group.collapsed),
     };
   });
+  const groupMaps = new Map(cleanGroups.map((group) => [group.id, group.mapId]));
+  for (const node of cleanNodes) {
+    if (node.groupId && groupMaps.get(node.groupId) !== node.mapId) node.groupId = null;
+  }
 
   const settings = plainObject(raw.settings) ? raw.settings : {};
   return {

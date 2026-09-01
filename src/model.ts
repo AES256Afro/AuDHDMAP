@@ -10,6 +10,13 @@ export interface Attachment {
   createdAt: string;
 }
 
+export interface WebLink {
+  id: string;
+  url: string;
+  title: string;
+  createdAt: string;
+}
+
 export interface TaskFields {
   status: TaskStatus;
   start: string;
@@ -33,6 +40,7 @@ export interface ThoughtNode {
   categoryId: string | null;
   tags: string[];
   attachments: Attachment[];
+  links: WebLink[];
   task: TaskFields | null;
   createdAt: string;
   updatedAt: string;
@@ -51,6 +59,7 @@ export interface MapGroup {
   id: string;
   mapId: string;
   title: string;
+  description: string;
   x: number;
   y: number;
   width: number;
@@ -122,4 +131,8 @@ export function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+export function isPreviewableImage(mime: string) {
+  return ["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"].includes(mime);
 }

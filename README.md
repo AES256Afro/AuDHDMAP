@@ -4,16 +4,17 @@ AuDHDMAP is a private, self-hosted mind-mapping and note-taking workspace. Captu
 
 ![Signal Garden branch focus](docs/mockups/02-signal-garden-focus.png)
 
-## What works in 0.1.0
+## What works in 0.2.0
 
-- Free pan-and-zoom canvas with draggable nodes, branches, labeled cross-references, group boundaries, grid snapping, and explicit tree or grid auto-layout.
-- Editable hierarchical Outline plus a separate References section for non-tree links.
+- Free pan-and-zoom canvas with draggable nodes, branches, two-way labeled references, editable group boundaries, grid snapping, and explicit tree or grid auto-layout.
+- Strict Branch Focus that shows the selected branch, its ancestors, descendants, and explicit references while hiding unrelated clutter.
+- Editable hierarchical Outline plus a separate References section for same-map and cross-map links.
 - Board, Timeline, and read-only Gantt views over the same node data.
 - Optional task status, priority, dates, progress, and milestones on any thought.
 - Full Markdown note editing and sanitized preview.
-- Categories, tags, semantic colors, attachment upload and protected retrieval.
-- Branch focus with a visible exit and dimmed context.
-- Keyboard creation, deletion, focus, undo, and visible shortcut help.
+- Categories, tags, semantic colors, actual file or web-link dropping, protected attachment retrieval, image thumbnails, and clean web-link cards.
+- Boundary creation around a selected branch, including editable names, descriptions, colors, shapes, position, and dimensions.
+- Keyboard creation, outdent, deletion, focus, undo, redo, and visible shortcut help.
 - Quiet Canvas, Signal Garden, Amber Operator, Workstation 84, and Paper Atlas themes.
 - Brightness, saturation, branch font, node shape, line weight, reduced motion, and optional CRT effects.
 - Queued autosave with revision-conflict protection, JSON export, validated import, and atomic persistence.
@@ -53,7 +54,7 @@ The development login is `owner` with password `boxpilot`. Development data is w
 ```sh
 npm run check
 npm audit
-docker build -t audhdmap:0.1.0 .
+docker build -t audhdmap:0.2.0 .
 ```
 
 The health endpoint is available without authentication at `/api/health`. It reports only application version, storage readiness, revision, and bounded object counts. It never returns workspace content.
@@ -62,7 +63,7 @@ The health endpoint is available without authentication at `/api/health`. It rep
 
 The production image is designed for BoxPilot's generic application catalog:
 
-- image: `ghcr.io/aes256afro/audhdmap:0.1.0`
+- image: `ghcr.io/aes256afro/audhdmap:0.2.0`
 - container port: `3010`
 - persistent volume: `/data`
 - required generated secrets: `AUDHDMAP_ADMIN_PASSWORD` and `AUDHDMAP_SESSION_SECRET`

@@ -38,9 +38,9 @@ function createSessions(secret, { now = () => Date.now(), lifetimeMs = 12 * 60 *
   return { create, verify };
 }
 
-function contentDisposition(filename) {
+function contentDisposition(filename, disposition = "attachment") {
   const safe = filename.replace(/[\r\n"\\]/g, "_").slice(0, 240) || "attachment";
-  return `inline; filename="${safe}"`;
+  return `${disposition}; filename="${safe}"`;
 }
 
 export function createApp({
@@ -51,7 +51,7 @@ export function createApp({
   distDirectory = defaultDist,
   now = () => Date.now(),
   maxAttachmentBytes = 25 * 1024 * 1024,
-  version = "0.1.0",
+  version = "development",
 } = {}) {
   if (!store) throw new Error("store is required");
   if (!adminPassword) throw new Error("AUDHDMAP_ADMIN_PASSWORD is required");
@@ -178,9 +178,11 @@ export function createApp({
     const filePath = path.join(store.attachmentDirectory, attachment.id);
     try {
       const info = await stat(filePath);
-      response.setHeader("Content-Type", attachment.mime);
+      const inlineImages = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"]);
+      const previewable = inlineImages.has(attachment.mime);
+      response.setHeader("Content-Type", previewable ? attachment.mime : "application/octet-stream");
       response.setHeader("Content-Length", String(info.size));
-      response.setHeader("Content-Disposition", contentDisposition(attachment.name));
+      response.setHeader("Content-Disposition", contentDisposition(attachment.name, previewable ? "inline" : "attachment"));
       response.send(await readFile(filePath));
     } catch { response.status(404).json({ error: "Attachment data is missing." }); }
   });
