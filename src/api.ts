@@ -128,7 +128,7 @@ export function mapExportUrl(format: "pdf" | "svg" | "md" | "txt" | "csv", mapId
 export async function uploadAttachment(file: File) {
   return parse<Attachment>(await fetch("/api/attachments", {
     method: "POST",
-    headers: { "Content-Type": "application/octet-stream", "x-file-name": file.name, "x-file-type": file.type || "application/octet-stream", ...mutationHeaders },
+    headers: { "Content-Type": "application/octet-stream", "x-file-name": encodeURIComponent(file.name), "x-file-type": file.type || "application/octet-stream", ...mutationHeaders },
     body: file,
   }));
 }

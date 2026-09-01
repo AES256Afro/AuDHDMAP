@@ -15,7 +15,10 @@ const defaultDist = path.join(packageRoot, "dist");
 function parseCookies(header = "") {
   return Object.fromEntries(header.split(";").map((part) => part.trim()).filter(Boolean).map((part) => {
     const index = part.indexOf("=");
-    return index === -1 ? [part, ""] : [part.slice(0, index), decodeURIComponent(part.slice(index + 1))];
+    if (index === -1) return [part, ""];
+    const encoded = part.slice(index + 1);
+    try { return [part.slice(0, index), decodeURIComponent(encoded)]; }
+    catch { return [part.slice(0, index), encoded]; }
   }));
 }
 
@@ -44,8 +47,16 @@ function createSessions(secret, { now = () => Date.now(), lifetimeMs = 12 * 60 *
 }
 
 function contentDisposition(filename, disposition = "attachment") {
-  const safe = filename.replace(/[\u0000-\u001f\u007f-\u009f"\\]/g, "_").slice(0, 240) || "attachment";
-  return `${disposition}; filename="${safe}"`;
+  const unicode = Buffer.from(String(filename), "utf8").toString("utf8").replace(/[\u0000-\u001f\u007f-\u009f]/g, "_").slice(0, 240) || "attachment";
+  const fallback = unicode.normalize("NFKD").replace(/[^\x20-\x7e]|["\\]/g, "_") || "attachment";
+  const encoded = encodeURIComponent(unicode).replace(/[!'()*]/g, (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
+  return `${disposition}; filename="${fallback}"; filename*=UTF-8''${encoded}`;
+}
+
+function decodedHeader(value, fallback) {
+  const encoded = String(value || fallback);
+  try { return decodeURIComponent(encoded); }
+  catch { return encoded; }
 }
 
 function safeAttachmentId(value) {
@@ -148,7 +159,7 @@ export function createApp({
       response.setHeader("Cache-Control", "no-store");
       response.json({ ok: true, version, storage: "ready", ...ready });
     } catch (error) {
-      response.status(503).json({ ok: false, version, storage: "unavailable", error: error.message });
+      response.status(503).json({ ok: false, version, storage: "unavailable" });
     }
   });
 
@@ -342,7 +353,7 @@ export function createApp({
   app.post("/api/attachments", requireAuth, express.raw({ type: "application/octet-stream", limit: maxAttachmentBytes }), async (request, response) => {
     if (!Buffer.isBuffer(request.body) || request.body.length === 0) return response.status(400).json({ error: "Choose a non-empty file." });
     const id = `attachment-${crypto.randomUUID()}`;
-    const name = String(request.get("x-file-name") || "attachment").slice(0, 240);
+    const name = decodedHeader(request.get("x-file-name"), "attachment").slice(0, 240);
     const claimedMime = String(request.get("x-file-type") || "application/octet-stream").slice(0, 120);
     const mime = claimedMime.startsWith("image/") ? verifiedImageMime(request.body, claimedMime) : claimedMime;
     await writeFile(path.join(store.attachmentDirectory, id), request.body, { mode: 0o600, flag: "wx" });
@@ -351,7 +362,11 @@ export function createApp({
 
   app.get("/api/attachments/:id", requireAuth, async (request, response) => {
     const workspace = await store.read();
-    const attachment = workspace.nodes.flatMap((node) => node.attachments).find((entry) => entry.id === request.params.id);
+    let attachment;
+    for (const node of workspace.nodes) {
+      attachment = node.attachments.find((entry) => entry.id === request.params.id);
+      if (attachment) break;
+    }
     if (!attachment) return response.status(404).json({ error: "Attachment not found." });
     const filePath = path.join(store.attachmentDirectory, attachment.id);
     try {

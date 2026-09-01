@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.3
+
+- Treat malformed percent-encoded session cookies as invalid anonymous sessions instead of returning a server error.
+- Keep public unavailable-health responses generic so internal storage errors and paths are not disclosed.
+- Percent-encode Unicode attachment names in upload requests and use an ASCII fallback plus an RFC 5987 UTF-8 download filename.
+- Find requested attachment metadata without allocating a flattened copy of every attachment list.
+- Add API regressions for malformed cookies, health failure disclosure, Unicode attachment round trips, and safe download headers.
+
 ## 0.6.2
 
 - Keep Tab and Shift+Tab focus inside every active dialog so keyboard navigation cannot disappear behind an open panel.
