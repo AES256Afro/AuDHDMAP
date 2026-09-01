@@ -157,6 +157,56 @@ export function renderMapText(workspace, mapId, focusId = null) {
   return `${lines.join("\n").trim()}\n`;
 }
 
+function spreadsheetSafe(value) {
+  const text = String(value ?? "");
+  return /^[\t\r\n ]*[=+\-@]/.test(text) ? `'${text}` : text;
+}
+
+function csvCell(value) {
+  return `"${spreadsheetSafe(value).replace(/"/g, '""')}"`;
+}
+
+export function renderMapCsv(workspace, mapId, focusId = null) {
+  const { map, nodes } = exportSelection(workspace, mapId, focusId);
+  const ordered = orderedNodes(nodes);
+  const pathById = new Map();
+  const activeNodeById = new Map(workspace.nodes.filter((node) => !node.trashedAt).map((node) => [node.id, node]));
+  const mapById = new Map(workspace.maps.map((entry) => [entry.id, entry]));
+  const referencesByNode = new Map();
+  for (const edge of workspace.edges) {
+    if (edge.type !== "reference") continue;
+    const source = activeNodeById.get(edge.source); const target = activeNodeById.get(edge.target);
+    if (!source || !target) continue;
+    const outgoing = ["out", target.id, target.title, mapById.get(target.mapId)?.title ?? "", edge.label].join("|");
+    const incoming = ["in", source.id, source.title, mapById.get(source.mapId)?.title ?? "", edge.label].join("|");
+    referencesByNode.set(source.id, [...(referencesByNode.get(source.id) ?? []), outgoing]);
+    referencesByNode.set(target.id, [...(referencesByNode.get(target.id) ?? []), incoming]);
+  }
+  const headers = [
+    "map_title", "map_id", "hierarchy_path", "depth", "title", "thought_id", "parent_id", "record_type",
+    "status", "start", "due", "priority", "progress_percent", "milestone", "tags", "note",
+    "references", "web_links", "attachments",
+  ];
+  const rows = [headers.map(csvCell).join(",")];
+
+  for (const { node, depth } of ordered) {
+    const parentPath = node.parentId ? pathById.get(node.parentId) : "";
+    const hierarchyPath = parentPath ? `${parentPath} > ${node.title}` : node.title;
+    pathById.set(node.id, hierarchyPath);
+    const references = (referencesByNode.get(node.id) ?? []).join("\n");
+    const links = node.links.map((link) => `${link.title}|${link.url}`).join("\n");
+    const attachments = node.attachments.map((attachment) => `${attachment.name}|${attachment.mime}|${attachment.size}`).join("\n");
+    const values = [
+      map.title, map.id, hierarchyPath, depth, node.title, node.id, node.parentId ?? "", node.task ? "task" : "thought",
+      node.task?.status ?? "", node.task?.start ?? "", node.task?.due ?? "", node.task?.priority ?? "",
+      node.task?.progress ?? "", node.task ? String(node.task.milestone) : "", node.tags.join("|"), plainText(node.note),
+      references, links, attachments,
+    ];
+    rows.push(values.map(csvCell).join(","));
+  }
+  return `\uFEFF${rows.join("\r\n")}\r\n`;
+}
+
 function mapGeometry(workspace, mapId, focusId = null) {
   const selection = exportSelection(workspace, mapId, focusId);
   const ids = new Set(selection.nodes.map((node) => node.id));

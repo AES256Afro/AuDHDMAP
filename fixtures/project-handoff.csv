@@ -1,0 +1,3 @@
+"map_title","map_id","hierarchy_path","depth","title","thought_id","parent_id","record_type","status","start","due","priority","progress_percent","milestone","tags","note","references","web_links","attachments"
+"Fixture project","map-fixture","Fixture project","0","Fixture project","thought-root","","thought","","","","","","","planning","Project note.","out|thought-task|Ship fixture|Fixture project|supports","",""
+"Fixture project","map-fixture","Fixture project > Ship fixture","1","Ship fixture","thought-task","thought-root","task","doing","2026-09-02","2026-09-05","high","40","true","delivery|test","Task note.","in|thought-root|Fixture project|Fixture project|supports","Docs|https://example.com/docs",""

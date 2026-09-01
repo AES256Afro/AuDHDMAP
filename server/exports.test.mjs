@@ -1,6 +1,7 @@
+import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { defaultWorkspace } from "./default-workspace.mjs";
-import { exportSelection, renderMapMarkdown, renderMapPdf, renderMapSvg, renderMapText, safeExportSlug } from "./exports.mjs";
+import { exportSelection, renderMapCsv, renderMapMarkdown, renderMapPdf, renderMapSvg, renderMapText, safeExportSlug } from "./exports.mjs";
 
 describe("workspace exports", () => {
   it("exports a focused branch without leaking its siblings", () => {
@@ -20,6 +21,26 @@ describe("workspace exports", () => {
     expect(text).toContain("Home server rebuild");
     expect(text).toContain("  - Storage plan");
     expect(text).not.toContain("**");
+  });
+
+  it("exports a spreadsheet-safe project handoff with hierarchy, tasks, and references", () => {
+    const workspace = defaultWorkspace(new Date("2026-09-01T12:00:00.000Z"));
+    workspace.nodes.find((node) => node.id === "node-storage").title = "=unsafe formula";
+    const csv = renderMapCsv(workspace, "map-home-server");
+    expect(csv.startsWith("\uFEFF\"map_title\"")).toBe(true);
+    expect(csv).toContain("Home server rebuild > =unsafe formula");
+    expect(csv).toContain("\"'=unsafe formula\"");
+    expect(csv).toContain('"task","doing","2026-09-15","2026-09-18","high","50","false"');
+    expect(csv).toContain("out|node-restore|Test restore|Home server rebuild|before cutover");
+    expect(csv).toContain("in|node-apps|App migration|Home server rebuild|before cutover");
+    expect(csv).not.toContain(',"=unsafe formula"');
+  });
+
+  it("matches the durable project-handoff CSV fixture", async () => {
+    const workspace = JSON.parse(await readFile(new URL("../fixtures/project-handoff-workspace.json", import.meta.url), "utf8"));
+    const expected = await readFile(new URL("../fixtures/project-handoff.csv", import.meta.url), "utf8");
+    const actual = renderMapCsv(workspace, "map-fixture").replace(/^\uFEFF/, "").replace(/\r\n/g, "\n");
+    expect(actual).toBe(expected);
   });
 
   it("keeps trashed thoughts and their descendants out of ordinary exports", () => {

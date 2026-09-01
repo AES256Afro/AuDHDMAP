@@ -2,7 +2,7 @@
 
 ## Intended boundary
 
-AuDHDMAP 0.5.0 is a private, single-owner application. It is suitable for a trusted individual or household behind BoxPilot, a private network, a VPN, or a carefully configured HTTPS reverse proxy. It is not a multi-tenant collaboration service and does not implement per-map roles, public sharing, or anonymous write access.
+AuDHDMAP 0.6.0 is a private, single-owner application. It is suitable for a trusted individual or household behind BoxPilot, a private network, a VPN, or a carefully configured HTTPS reverse proxy. It is not a multi-tenant collaboration service and does not implement per-map roles, public sharing, or anonymous write access.
 
 ## Controls in this release
 
@@ -18,6 +18,8 @@ AuDHDMAP 0.5.0 is a private, single-owner application. It is suitable for a trus
 - SVG and other active file formats download as opaque bytes. Only verified PNG, JPEG, GIF, WebP, and AVIF signatures can render inline. Attachment names are sanitized before entering a response header.
 - Markdown preview is sanitized before it enters the DOM. Web links are restricted to HTTP and HTTPS and open with referrer isolation.
 - Backup restore rejects unsafe or unexpected paths, duplicate entries, excessive entry counts, excessive expanded bytes, oversized files, invalid manifests, inventory mismatches, metadata mismatches, and checksum failures before mutation.
+- JSON import is capped at 8 MiB and must pass a non-mutating preview. Confirmation is SHA-256-bound to the exact candidate and expected revision, then checked again inside the serialized mutation queue. Missing, mismatched, non-regular, or symlinked attachment bytes block import with guidance to use a complete ZIP.
+- Confirmed JSON import requires a valid recovery point for the current revision before its atomic replacement write. Attachment bytes removed from imported metadata are deleted from the current directory only after that commit; retained recovery points may still hold them. Rejected, tampered, unpreviewed, and stale candidates leave the workspace unchanged.
 - Persistence uses private permissions, unique temporary files, atomic workspace renames, revision checks, a serialized mutation queue, and crash recovery for the restore swap.
 - Thought deletion is recoverable by default. Permanent deletion is accepted only for an already-trashed record at the current revision; metadata commits before attachment bytes are removed, and in-tab history is cleared so undo cannot resurrect dangling metadata.
 - Server recovery points use a fixed identifier format, private directories, fixed top-level layout, regular-file and symlink checks, manifest and revision matching, normalized workspace data, exact attachment inventory and size validation, atomic staging, and bounded retention.
@@ -34,6 +36,7 @@ AuDHDMAP 0.5.0 is a private, single-owner application. It is suitable for a trus
 - Keep versioned portable backups and test restore on separate storage.
 - Update to maintained version tags after reviewing release notes and completing a backup.
 - Treat exported JSON, Markdown, text, SVG, PDF, and ZIP files as private data. They can contain notes, tasks, URLs, filenames, and other workspace content.
+- Treat project CSV as private data too. Spreadsheet formula-leading cells are neutralized, but the export still contains the selected hierarchy, notes, tasks, references, URLs, and attachment names.
 - Treat `/data/snapshots` as private retained history. Permanent deletion from the current workspace does not erase existing recovery points, downloaded backups, or infrastructure snapshots.
 - Monitor `/data` free space. A filesystem without hard-link support uses copy fallback for recovery attachments, and a full volume can intentionally block destructive operations.
 

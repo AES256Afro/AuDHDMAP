@@ -155,9 +155,9 @@ CRT effects default to subtle, respect reduced-motion settings, and can all be d
 - Autosave shows `Saving`, `Saved`, or a specific failure with a Retry action.
 - Local undo and redo cover node edits, links, moves, deletions, layout, hierarchy changes, and imports.
 - Deletions go to a workspace trash view before permanent removal.
-- JSON export includes maps, nodes, links, categories, view settings, task fields, and attachment metadata.
-- Import validates schema, size, paths, identifiers, and references before changing the workspace.
-- A failed import changes nothing.
+- JSON export includes maps, nodes, links, categories, view settings, task fields, and attachment metadata. Project CSV preserves hierarchy, task fields, links, attachments, and labeled references for spreadsheet handoff.
+- Import previews schema, size, identifiers, relationships, record changes, and local attachment-byte availability before a replacement action is offered.
+- Confirmation is bound to the exact previewed payload and revision. A failed, changed, stale, or unpreviewed import changes nothing, and a ready import requires a current recovery point before replacement.
 - Up to 10 automatic internal recovery points provide server-local history between BoxPilot backups. They capture preceding revisions on a five-minute ordinary-save cadence and are forced before irreversible current-workspace operations.
 - Recovery points remain separate from portable ZIP downloads. Permanent deletion from the current workspace does not imply deletion from retained recovery points or backups.
 

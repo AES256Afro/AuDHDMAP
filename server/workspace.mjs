@@ -1,5 +1,5 @@
-import { randomUUID } from "node:crypto";
-import { access, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { access, lstat, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import path from "node:path";
 import { defaultWorkspace } from "./default-workspace.mjs";
@@ -7,6 +7,7 @@ import { createSnapshotManager } from "./snapshots.mjs";
 
 const idPattern = /^[A-Za-z0-9][A-Za-z0-9_-]{0,95}$/;
 const hexColor = /^#[0-9a-fA-F]{6}$/;
+const fallbackTimestamp = "1970-01-01T00:00:00.000Z";
 const themes = new Set(["quiet", "signal", "amber", "workstation", "paper"]);
 const statuses = new Set(["todo", "doing", "waiting", "blocked", "done"]);
 
@@ -64,8 +65,8 @@ export function normalizeWorkspace(raw, { revision = 0 } = {}) {
   const cleanMaps = maps.map((map) => ({
     id: takeId(map?.id, "Map"),
     title: shortString(map?.title, 160, "Untitled map").trim() || "Untitled map",
-    createdAt: shortString(map?.createdAt, 40, new Date().toISOString()),
-    updatedAt: shortString(map?.updatedAt, 40, new Date().toISOString()),
+    createdAt: shortString(map?.createdAt, 40, fallbackTimestamp),
+    updatedAt: shortString(map?.updatedAt, 40, fallbackTimestamp),
   }));
   const mapIds = new Set(cleanMaps.map((map) => map.id));
 
@@ -91,7 +92,7 @@ export function normalizeWorkspace(raw, { revision = 0 } = {}) {
         name: shortString(attachment?.name, 240, "attachment"),
         mime: shortString(attachment?.mime, 120, "application/octet-stream"),
         size: finite(attachment?.size, 0, 0, 25 * 1024 * 1024),
-        createdAt: shortString(attachment?.createdAt, 40, new Date().toISOString()),
+        createdAt: shortString(attachment?.createdAt, 40, fallbackTimestamp),
       };
     }).filter(Boolean) : [];
     const links = Array.isArray(node?.links) ? node.links.slice(0, 100).map((link) => {
@@ -103,7 +104,7 @@ export function normalizeWorkspace(raw, { revision = 0 } = {}) {
       return {
         id, url,
         title: shortString(link?.title, 240, "Web link").trim() || "Web link",
-        createdAt: shortString(link?.createdAt, 40, new Date().toISOString()),
+        createdAt: shortString(link?.createdAt, 40, fallbackTimestamp),
       };
     }).filter(Boolean) : [];
     const task = plainObject(node?.task) ? {
@@ -127,8 +128,8 @@ export function normalizeWorkspace(raw, { revision = 0 } = {}) {
       tags: Array.isArray(node.tags) ? node.tags.slice(0, 30).map((tag) => shortString(tag, 40)).filter(Boolean) : [],
       attachments, links, task,
       trashedAt: validTimestamp(node.trashedAt),
-      createdAt: shortString(node.createdAt, 40, new Date().toISOString()),
-      updatedAt: shortString(node.updatedAt, 40, new Date().toISOString()),
+      createdAt: shortString(node.createdAt, 40, fallbackTimestamp),
+      updatedAt: shortString(node.updatedAt, 40, fallbackTimestamp),
     };
   });
   const nodeById = new Map(cleanNodes.map((node) => [node.id, node]));
@@ -197,6 +198,66 @@ export function normalizeWorkspace(raw, { revision = 0 } = {}) {
       branchFont: ["system", "mono", "serif"].includes(settings.branchFont) ? settings.branchFont : "system",
       nodeShape: ["rounded", "square", "pill", "oval"].includes(settings.nodeShape) ? settings.nodeShape : "rounded",
     },
+  };
+}
+
+function canonicalJson(value) {
+  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "null";
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`;
+}
+
+export function importConfirmation(candidate, expectedRevision) {
+  const pending = [{ value: candidate, depth: 0 }];
+  while (pending.length) {
+    const { value, depth } = pending.pop();
+    if (value === null || typeof value !== "object") continue;
+    if (depth > 32) throw new Error("The JSON import is nested more deeply than this release supports.");
+    const children = Array.isArray(value) ? value : Object.values(value);
+    for (const child of children) pending.push({ value: child, depth: depth + 1 });
+  }
+  return createHash("sha256").update(JSON.stringify({ expectedRevision, workspace: candidate })).digest("hex");
+}
+
+function recordChanges(currentRecords, nextRecords) {
+  const current = new Map(currentRecords.map((record) => [record.id, record]));
+  const next = new Map(nextRecords.map((record) => [record.id, record]));
+  let added = 0; let updated = 0; let unchanged = 0;
+  for (const [id, record] of next) {
+    if (!current.has(id)) added += 1;
+    else if (canonicalJson(current.get(id)) === canonicalJson(record)) unchanged += 1;
+    else updated += 1;
+  }
+  let removed = 0;
+  for (const id of current.keys()) if (!next.has(id)) removed += 1;
+  return { added, updated, removed, unchanged, total: next.size };
+}
+
+function attachmentRecords(workspace) {
+  return workspace.nodes.flatMap((node) => node.attachments.map((attachment) => ({ ...attachment, nodeId: node.id })));
+}
+
+export function describeImport(current, next) {
+  return {
+    currentRevision: current.revision,
+    nextRevision: current.revision + 1,
+    changes: {
+      maps: recordChanges(current.maps, next.maps),
+      thoughts: recordChanges(current.nodes, next.nodes),
+      connections: recordChanges(current.edges, next.edges),
+      boundaries: recordChanges(current.groups, next.groups),
+      categories: recordChanges(current.categories, next.categories),
+      attachments: recordChanges(attachmentRecords(current), attachmentRecords(next)),
+    },
+    totals: {
+      maps: next.maps.length,
+      thoughts: next.nodes.filter((node) => !node.trashedAt).length,
+      trashed: next.nodes.filter((node) => Boolean(node.trashedAt)).length,
+      tasks: next.nodes.filter((node) => Boolean(node.task) && !node.trashedAt).length,
+      references: next.edges.filter((edge) => edge.type === "reference").length,
+      attachments: attachmentRecords(next).length,
+    },
+    settingsChanged: canonicalJson(current.settings) !== canonicalJson(next.settings),
   };
 }
 
@@ -315,6 +376,72 @@ export function createWorkspaceStore({ dataDirectory, now = () => new Date(), sn
       await captureSnapshot(current);
       await writeAtomic(next);
       currentDocument = next;
+      return structuredClone(next);
+    });
+    queue = work.catch(() => {});
+    return work;
+  }
+
+  async function assertImportAttachments(next) {
+    const attachments = attachmentRecords(next);
+    const problems = [];
+    for (let start = 0; start < attachments.length; start += 64) {
+      const batch = attachments.slice(start, start + 64);
+      const results = await Promise.all(batch.map(async (attachment) => {
+        try {
+          const info = await lstat(path.join(attachmentDirectory, attachment.id));
+          return info.isFile() && !info.isSymbolicLink() && info.size === attachment.size ? null : attachment;
+        } catch { return attachment; }
+      }));
+      problems.push(...results.filter(Boolean));
+      if (problems.length >= 8) break;
+    }
+    if (problems.length) {
+      const names = problems.slice(0, 3).map((attachment) => attachment.name).join(", ");
+      const error = new Error(`The JSON references attachment data that is missing or has a different size (${names}${problems.length > 3 ? ", ..." : ""}). Use a complete ZIP backup when moving attachments between servers.`);
+      error.code = "IMPORT_ATTACHMENT_MISSING";
+      throw error;
+    }
+  }
+
+  async function previewImport(raw, expectedRevision) {
+    const work = queue.then(async () => {
+      const current = await read();
+      if (current.revision !== expectedRevision) {
+        const error = new Error("Workspace changed in another session. Reload before previewing the import again.");
+        error.code = "REVISION_CONFLICT"; error.current = current; throw error;
+      }
+      const next = normalizeWorkspace(raw, { revision: current.revision + 1 });
+      await assertImportAttachments(next);
+      return {
+        status: "ready",
+        confirmation: importConfirmation(raw, expectedRevision),
+        preview: describeImport(current, next),
+      };
+    });
+    return work;
+  }
+
+  async function replaceImported(raw, expectedRevision, confirmation) {
+    const work = queue.then(async () => {
+      const current = await read();
+      if (current.revision !== expectedRevision) {
+        const error = new Error("Workspace changed in another session. Preview the import again before replacing it.");
+        error.code = "REVISION_CONFLICT"; error.current = current; throw error;
+      }
+      const next = normalizeWorkspace(raw, { revision: current.revision + 1 });
+      if (typeof confirmation !== "string" || !/^[a-f0-9]{64}$/.test(confirmation) || confirmation !== importConfirmation(raw, expectedRevision)) {
+        const error = new Error("Preview this exact JSON file before importing it.");
+        error.code = "IMPORT_NOT_PREVIEWED";
+        throw error;
+      }
+      await assertImportAttachments(next);
+      const nextAttachmentIds = new Set(attachmentRecords(next).map((attachment) => attachment.id));
+      const removedAttachmentIds = attachmentRecords(current).map((attachment) => attachment.id).filter((id) => !nextAttachmentIds.has(id));
+      await captureSnapshot(current, { force: true, required: true });
+      await writeAtomic(next);
+      currentDocument = next;
+      await Promise.all(removedAttachmentIds.map((id) => rm(path.join(attachmentDirectory, id), { force: true }).catch(() => {})));
       return structuredClone(next);
     });
     queue = work.catch(() => {});
@@ -471,7 +598,7 @@ export function createWorkspaceStore({ dataDirectory, now = () => new Date(), sn
   }
 
   return {
-    initialize, read, replace, removeAttachment, purgeTrashedNode, restore,
+    initialize, read, replace, previewImport, replaceImported, removeAttachment, purgeTrashedNode, restore,
     listSnapshots, createSnapshot, restoreSnapshot, readiness,
     dataDirectory, workspacePath, attachmentDirectory, snapshotDirectory: snapshots.root,
   };

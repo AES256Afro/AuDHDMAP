@@ -2,7 +2,7 @@ import { performance } from "node:perf_hooks";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { renderMapMarkdown, renderMapText } from "../server/exports.mjs";
+import { renderMapCsv, renderMapMarkdown, renderMapText } from "../server/exports.mjs";
 import { createWorkspaceStore, normalizeWorkspace } from "../server/workspace.mjs";
 
 const nodeCount = 10_000;
@@ -44,6 +44,7 @@ function timed(action) {
 
 const normalized = timed(() => normalizeWorkspace(workspace));
 const markdown = timed(() => renderMapMarkdown(normalized.value, "map-benchmark"));
+const csv = timed(() => renderMapCsv(normalized.value, "map-benchmark"));
 const trashWorkspace = {
   ...normalized.value,
   nodes: normalized.value.nodes.map((node, index) => index % 10 === 0 ? { ...node, trashedAt: "2026-09-01T13:00:00.000Z" } : node),
@@ -65,6 +66,10 @@ try {
   const snapshotListStarted = performance.now();
   const recoveryPoints = await store.listSnapshots();
   const snapshotListMilliseconds = performance.now() - snapshotListStarted;
+  const importPreviewStarted = performance.now();
+  const importCandidate = structuredClone(normalized.value); importCandidate.maps[0].title = "Previewed supported-limit import";
+  const importPreview = await store.previewImport(importCandidate, 1);
+  const importPreviewMilliseconds = performance.now() - importPreviewStarted;
   const restoreStarted = performance.now();
   await store.restoreSnapshot(recoveryPoint.id, 1);
   const snapshotRestoreMilliseconds = performance.now() - restoreStarted;
@@ -76,6 +81,8 @@ try {
     normalizeMilliseconds: Number(normalized.milliseconds.toFixed(1)),
     markdownMilliseconds: Number(markdown.milliseconds.toFixed(1)),
     markdownBytes: Buffer.byteLength(markdown.value),
+    csvMilliseconds: Number(csv.milliseconds.toFixed(1)),
+    csvBytes: Buffer.byteLength(csv.value),
     trashFilteredThoughts: trashWorkspace.nodes.filter((node) => !node.trashedAt).length,
     trashFilteredMarkdownMilliseconds: Number(trashFilteredMarkdown.milliseconds.toFixed(1)),
     deepChainNormalizeMilliseconds: Number(deepNormalized.milliseconds.toFixed(1)),
@@ -84,12 +91,14 @@ try {
     saveMilliseconds: Number(saveMilliseconds.toFixed(1)),
     recoveryPointMilliseconds: Number(snapshotMilliseconds.toFixed(1)),
     recoveryPointListMilliseconds: Number(snapshotListMilliseconds.toFixed(1)),
+    importPreviewMilliseconds: Number(importPreviewMilliseconds.toFixed(1)),
+    importPreviewThoughts: importPreview.preview.totals.thoughts,
     recoveryPointRestoreMilliseconds: Number(snapshotRestoreMilliseconds.toFixed(1)),
     recoveryPoints: recoveryPoints.snapshots.length,
     twentyDetachedReadsMilliseconds: Number(cachedReadMilliseconds.toFixed(1)),
   };
   console.log(JSON.stringify(report, null, 2));
-  if (normalized.milliseconds > 2_000 || markdown.milliseconds > 2_000 || trashFilteredMarkdown.milliseconds > 2_000 || deepNormalized.milliseconds > 2_000 || deepText.milliseconds > 2_000 || saveMilliseconds > 5_000 || snapshotMilliseconds > 5_000 || snapshotListMilliseconds > 5_000 || snapshotRestoreMilliseconds > 5_000 || cachedReadMilliseconds > 5_000) {
+  if (normalized.milliseconds > 2_000 || markdown.milliseconds > 2_000 || csv.milliseconds > 2_000 || trashFilteredMarkdown.milliseconds > 2_000 || deepNormalized.milliseconds > 2_000 || deepText.milliseconds > 2_000 || saveMilliseconds > 5_000 || snapshotMilliseconds > 5_000 || snapshotListMilliseconds > 5_000 || importPreviewMilliseconds > 5_000 || snapshotRestoreMilliseconds > 5_000 || cachedReadMilliseconds > 5_000) {
     throw new Error("A supported-limit performance budget was exceeded.");
   }
 } finally {

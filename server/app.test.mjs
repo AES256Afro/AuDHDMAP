@@ -206,13 +206,47 @@ describe("AuDHDMAP API", () => {
     expect(exported.workspace.nodes.every((node) => node.parentId === null || exportedIds.has(node.parentId))).toBe(true);
   });
 
-  it("exports PDF, SVG, Markdown, and plain text for an authenticated map", async () => {
+  it("previews and content-binds JSON import before a recovery-protected replacement", async () => {
+    const { base, store } = await setup(); const { cookie } = await signIn(base);
+    const headers = { cookie, "content-type": "application/json", "x-audhdmap-request": "1" };
+    const workspace = await store.read();
+    workspace.maps[0].title = "Previewed import";
+    workspace.nodes.pop();
+
+    const rejected = await fetch(`${base}/api/import/preview`, { method: "POST", headers, body: JSON.stringify({ workspace: { schemaVersion: 99 }, expectedRevision: 0 }) });
+    expect(rejected.status).toBe(422);
+    expect(await rejected.json()).toMatchObject({ status: "rejected", error: expect.stringMatching(/schema version/i) });
+    expect((await store.read()).revision).toBe(0);
+
+    const previewed = await fetch(`${base}/api/import/preview`, { method: "POST", headers, body: JSON.stringify({ workspace, expectedRevision: 0 }) });
+    expect(previewed.status).toBe(200);
+    expect(previewed.headers.get("cache-control")).toBe("private, no-store");
+    const preview = await previewed.json();
+    expect(preview).toMatchObject({ status: "ready", confirmation: expect.stringMatching(/^[a-f0-9]{64}$/), preview: { currentRevision: 0, nextRevision: 1 } });
+
+    const withoutPreview = await fetch(`${base}/api/import`, { method: "POST", headers, body: JSON.stringify({ workspace, expectedRevision: 0 }) });
+    expect(withoutPreview.status).toBe(409);
+    const tampered = structuredClone(workspace); tampered.maps[0].title = "Different payload";
+    const mismatched = await fetch(`${base}/api/import`, { method: "POST", headers, body: JSON.stringify({ workspace: tampered, expectedRevision: 0, confirmation: preview.confirmation }) });
+    expect(mismatched.status).toBe(409);
+    expect((await store.read()).revision).toBe(0);
+
+    const imported = await fetch(`${base}/api/import`, { method: "POST", headers, body: JSON.stringify({ workspace, expectedRevision: 0, confirmation: preview.confirmation }) });
+    expect(imported.status).toBe(200);
+    const importedWorkspace = await imported.json();
+    expect(importedWorkspace.revision).toBe(1);
+    expect(importedWorkspace.maps[0].title).toBe("Previewed import");
+    expect((await store.listSnapshots()).snapshots.map((point) => point.revision)).toContain(0);
+  });
+
+  it("exports PDF, SVG, Markdown, plain text, and project CSV for an authenticated map", async () => {
     const { base } = await setup(); const { cookie } = await signIn(base);
     const formats = [
       ["pdf", "application/pdf", "%PDF-"],
       ["svg", "image/svg+xml", "<?xml"],
       ["md", "text/markdown", "# Home server rebuild"],
       ["txt", "text/plain", "Home server rebuild"],
+      ["csv", "text/csv", "\"map_title\""],
     ];
     for (const [format, contentType, prefix] of formats) {
       const response = await fetch(`${base}/api/export/map.${format}?mapId=map-home-server`, { headers: { cookie } });
@@ -257,10 +291,11 @@ describe("AuDHDMAP API", () => {
     expect((await readdir(store.dataDirectory)).filter((name) => name.startsWith(".backup-upload-"))).toEqual([]);
   });
 
-  it("rejects an invalid import without changing the current revision", async () => {
+  it("rejects an import that did not complete preview without changing the current revision", async () => {
     const { base, store } = await setup(); const { cookie } = await signIn(base);
-    const response = await fetch(`${base}/api/import`, { method: "POST", headers: { cookie, "content-type": "application/json", "x-audhdmap-request": "1" }, body: JSON.stringify({ expectedRevision: 0, workspace: { schemaVersion: 999 } }) });
-    expect(response.status).toBe(400);
+    const workspace = await store.read();
+    const response = await fetch(`${base}/api/import`, { method: "POST", headers: { cookie, "content-type": "application/json", "x-audhdmap-request": "1" }, body: JSON.stringify({ expectedRevision: 0, workspace }) });
+    expect(response.status).toBe(409);
     expect((await store.read()).revision).toBe(0);
   });
 });

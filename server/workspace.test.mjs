@@ -16,6 +16,15 @@ async function tempStore() {
 }
 
 describe("workspace normalization", () => {
+  it("accepts the durable project-handoff JSON fixture without dropping core records", async () => {
+    const fixture = JSON.parse(await readFile(new URL("../fixtures/project-handoff-workspace.json", import.meta.url), "utf8"));
+    const clean = normalizeWorkspace(fixture);
+    expect(clean.maps.map((map) => map.id)).toEqual(["map-fixture"]);
+    expect(clean.nodes.map((node) => node.id)).toEqual(["thought-root", "thought-task"]);
+    expect(clean.nodes[1].task).toMatchObject({ status: "doing", due: "2026-09-05", progress: 40, milestone: true });
+    expect(clean.edges.find((edge) => edge.id === "edge-reference")).toMatchObject({ type: "reference", label: "supports" });
+  });
+
   it("keeps the canonical seed valid and bounds visual settings", () => {
     const raw = defaultWorkspace(new Date("2026-09-01T12:00:00.000Z"));
     raw.settings.brightness = 999;
@@ -177,6 +186,80 @@ describe("workspace store", () => {
     expect(purged.revision).toBe(2);
     expect(purged.nodes.some((node) => node.id === purgedId)).toBe(false);
     await expect(access(attachmentPath)).rejects.toThrow();
+  });
+
+  it("previews the exact JSON replacement and preserves the prior revision before import", async () => {
+    const store = await tempStore();
+    const candidate = await store.read();
+    candidate.maps[0].title = "Imported project";
+    candidate.nodes = candidate.nodes.filter((node) => node.id !== "node-inventory");
+    candidate.edges = candidate.edges.filter((edge) => edge.source !== "node-inventory" && edge.target !== "node-inventory");
+    candidate.maps.push({ id: "map-imported", title: "Imported map", createdAt: "2026-09-01T12:00:00.000Z", updatedAt: "2026-09-01T12:00:00.000Z" });
+
+    const result = await store.previewImport(candidate, 0);
+    expect(result).toMatchObject({
+      status: "ready",
+      confirmation: expect.stringMatching(/^[a-f0-9]{64}$/),
+      preview: {
+        currentRevision: 0, nextRevision: 1,
+        changes: { maps: { added: 1, updated: 1 }, thoughts: { removed: 1 } },
+      },
+    });
+    const tampered = structuredClone(candidate); tampered.maps[0].title = "Not previewed";
+    await expect(store.replaceImported(tampered, 0, result.confirmation)).rejects.toMatchObject({ code: "IMPORT_NOT_PREVIEWED" });
+    expect((await store.read()).revision).toBe(0);
+
+    const imported = await store.replaceImported(candidate, 0, result.confirmation);
+    expect(imported).toMatchObject({ revision: 1 });
+    expect(imported.maps[0].title).toBe("Imported project");
+    expect((await store.listSnapshots()).snapshots.map((point) => point.revision)).toContain(0);
+    await expect(store.replaceImported(candidate, 0, result.confirmation)).rejects.toMatchObject({ code: "REVISION_CONFLICT" });
+  });
+
+  it("rejects excessively nested extra JSON before issuing an import confirmation", async () => {
+    const store = await tempStore();
+    const candidate = await store.read();
+    let cursor = candidate;
+    for (let depth = 0; depth < 34; depth += 1) { cursor.extra = {}; cursor = cursor.extra; }
+    await expect(store.previewImport(candidate, 0)).rejects.toThrow(/nested more deeply/i);
+    expect((await store.read()).revision).toBe(0);
+  });
+
+  it("rejects JSON attachment references unless matching regular bytes already exist", async () => {
+    const store = await tempStore();
+    const candidate = await store.read();
+    candidate.nodes[0].attachments = [{ id: "attachment-import", name: "handoff.txt", mime: "text/plain", size: 7, createdAt: "2026-09-01T12:00:00.000Z" }];
+    await expect(store.previewImport(candidate, 0)).rejects.toMatchObject({ code: "IMPORT_ATTACHMENT_MISSING" });
+    expect((await store.read()).revision).toBe(0);
+
+    await writeFile(path.join(store.attachmentDirectory, "attachment-import"), "content", { mode: 0o600 });
+    const preview = await store.previewImport(candidate, 0);
+    expect(preview.preview.totals.attachments).toBe(1);
+    expect(preview.preview.changes.attachments.added).toBe(1);
+
+    candidate.nodes[0].attachments[0].size = 8;
+    await expect(store.previewImport(candidate, 0)).rejects.toMatchObject({ code: "IMPORT_ATTACHMENT_MISSING" });
+  });
+
+  it("removes attachment bytes dropped by import while preserving them in the required recovery point", async () => {
+    const store = await tempStore();
+    const attachment = { id: "attachment-before-import", name: "before.txt", mime: "text/plain", size: 6, createdAt: "2026-09-01T12:00:00.000Z" };
+    const attachmentPath = path.join(store.attachmentDirectory, attachment.id);
+    await writeFile(attachmentPath, "before", { mode: 0o600 });
+    const current = await store.read(); current.nodes[0].attachments.push(attachment);
+    const withAttachment = await store.replace(current, 0);
+    const candidate = structuredClone(withAttachment); candidate.nodes[0].attachments = [];
+    const preview = await store.previewImport(candidate, 1);
+    expect(preview.preview.changes.attachments.removed).toBe(1);
+
+    const imported = await store.replaceImported(candidate, 1, preview.confirmation);
+    expect(imported.revision).toBe(2);
+    await expect(access(attachmentPath)).rejects.toThrow();
+    const point = (await store.listSnapshots()).snapshots.find((entry) => entry.revision === 1);
+    expect(point).toBeTruthy();
+    const restored = await store.restoreSnapshot(point.id, 2);
+    expect(restored.nodes[0].attachments).toEqual([attachment]);
+    expect(await readFile(attachmentPath, "utf8")).toBe("before");
   });
 
   it("rolls back attachment directories after a restore interrupted before its workspace commit", async () => {

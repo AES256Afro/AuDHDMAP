@@ -17,6 +17,26 @@ export interface RecoveryPointList {
   warning: string | null;
 }
 
+export interface ImportRecordChanges {
+  added: number;
+  updated: number;
+  removed: number;
+  unchanged: number;
+  total: number;
+}
+
+export interface ImportPreview {
+  currentRevision: number;
+  nextRevision: number;
+  changes: Record<"maps" | "thoughts" | "connections" | "boundaries" | "categories" | "attachments", ImportRecordChanges>;
+  totals: { maps: number; thoughts: number; trashed: number; tasks: number; references: number; attachments: number };
+  settingsChanged: boolean;
+}
+
+export type ImportPreviewResult =
+  | { status: "ready"; confirmation: string; preview: ImportPreview }
+  | { status: "rejected"; error: string };
+
 async function parse<T>(response: Response): Promise<T> {
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body.error || `Request failed with status ${response.status}.`);
@@ -71,11 +91,23 @@ export async function restoreRecoveryPoint(id: string, expectedRevision: number)
   }));
 }
 
-export async function importWorkspace(workspace: unknown, expectedRevision: number) {
-  return parse<Workspace>(await fetch("/api/import", {
+export async function previewWorkspaceImport(workspace: unknown, expectedRevision: number): Promise<ImportPreviewResult> {
+  const response = await fetch("/api/import/preview", {
     method: "POST",
     headers: { "Content-Type": "application/json", ...mutationHeaders },
     body: JSON.stringify({ workspace, expectedRevision }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (response.status === 422) return { status: "rejected", error: body.error || "The JSON file is not a supported AuDHDMAP workspace." };
+  if (!response.ok) throw new Error(body.error || `Request failed with status ${response.status}.`);
+  return body as ImportPreviewResult;
+}
+
+export async function importWorkspace(workspace: unknown, expectedRevision: number, confirmation: string) {
+  return parse<Workspace>(await fetch("/api/import", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...mutationHeaders },
+    body: JSON.stringify({ workspace, expectedRevision, confirmation }),
   }));
 }
 
@@ -87,7 +119,7 @@ export async function restoreBackup(file: File, expectedRevision: number) {
   }));
 }
 
-export function mapExportUrl(format: "pdf" | "svg" | "md" | "txt", mapId: string, focusId: string | null) {
+export function mapExportUrl(format: "pdf" | "svg" | "md" | "txt" | "csv", mapId: string, focusId: string | null) {
   const query = new URLSearchParams({ mapId });
   if (focusId) query.set("focusId", focusId);
   return `/api/export/map.${format}?${query}`;

@@ -45,7 +45,20 @@ The ZIP includes:
 
 ZIP creation fails rather than producing a partial backup when a referenced attachment is missing or its size does not match the saved metadata.
 
-Complete ZIP backups include trashed thoughts and their attachments. PDF, SVG, Markdown, plain text, and data-only JSON exports omit trash. Use the ZIP when the goal is recovery; use the other formats when the goal is sharing or interchange.
+Complete ZIP backups include trashed thoughts and their attachments. PDF, SVG, Markdown, plain text, project CSV, and data-only JSON exports omit trash. Use the ZIP when the goal is recovery; use the other formats when the goal is sharing or interchange.
+
+## Project CSV and JSON handoff
+
+Project CSV is scoped to the current map or focused branch. It includes every visible thought, not just tasks, so parent/child structure remains reconstructable. Stable IDs, hierarchy path and depth, task fields, tags, plain-text notes, labeled reference direction, web links, and attachment metadata each have explicit columns. Values are consistently quoted, formula-leading cells are prefixed for spreadsheet safety, and rows use portable CRLF endings.
+
+Data-only JSON is useful for moving a workspace structure back into AuDHDMAP. It does not contain attachment bytes. After selecting a JSON file, AuDHDMAP performs a non-mutating server preview that:
+
+- validates and normalizes the supported workspace schema within the 8 MiB request ceiling;
+- compares stable IDs and reports records that will be added, replaced, removed, or retained;
+- verifies that every referenced attachment is already a regular local file with the declared byte size;
+- binds a SHA-256 confirmation value to the exact candidate and current revision.
+
+Only the explicit **Replace workspace with this JSON** action can commit a ready preview. The server rechecks the payload, confirmation value, revision, schema, relationships, and attachment inventory, then requires a current server recovery point before the atomic workspace write. After that write commits, attachment files referenced by the old workspace but absent from the import are removed from the current attachment directory. The required recovery point can still retain those files according to recovery retention. A rejected, changed, stale, or unpreviewed candidate changes nothing. Use a complete ZIP, not JSON, when moving attachment bytes to another server.
 
 ## Server recovery points
 
@@ -112,7 +125,7 @@ docker compose ps
 
 Avoid relying on the moving `edge` tag for a controlled installation. Use the catalog's versioned image.
 
-## Limits in 0.5.0
+## Limits in 0.6.0
 
 - 200 maps
 - 10,000 thoughts
@@ -122,7 +135,7 @@ Avoid relying on the moving `edge` tag for a controlled installation. Use the ca
 - 64 categories
 - 100 attachments and 100 web links per thought
 - 25 MiB per attachment
-- 3 MiB JSON API payload
+- 8 MiB JSON API payload
 - 512 MiB compressed backup upload
 - 2 GiB expanded backup and 20,010 ZIP entries
 - 10 valid server recovery points
@@ -140,6 +153,8 @@ Recovery-point storage depends on filesystem support. Hard-linked immutable atta
 **A backup returns a conflict:** a referenced attachment is missing or differs from its metadata. Preserve `/data`, identify the named attachment, and repair the data before treating any new archive as complete.
 
 **Restore is rejected:** keep the current data untouched. Confirm the file is an AuDHDMAP ZIP, has not been modified, is within configured limits, and was uploaded after the current workspace finished saving.
+
+**JSON import is rejected:** read the preview reason. Use schema version 1, keep the file within 8 MiB, and use a complete ZIP if the workspace references attachments whose exact bytes are not already on this server. If the workspace changed after preview, select and preview the file again.
 
 **Startup reports a restore recovery marker problem:** do not delete files at random. Preserve the whole data directory before repair. The fail-closed message means the application could not prove whether the old or new attachment directory belongs with the workspace revision.
 

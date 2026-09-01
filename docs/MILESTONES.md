@@ -58,11 +58,16 @@ Acceptance criteria:
 
 ## 0.6.0 - Interoperable project handoff
 
-Status: dependent on 0.3.0 export stability
+Status: shipped
 
-- Task-oriented CSV and document exports preserve hierarchy, dates, statuses, and references.
-- Import previews explain what will be added, replaced, or rejected before mutation.
-- Format compatibility is tested with durable fixtures rather than vendor-specific UI automation alone.
+Acceptance criteria:
+
+- Current-map and focused-branch project CSV preserves stable map and thought IDs, hierarchy path and depth, task dates/status/priority/progress/milestones, tags, notes, web links, attachment metadata, and labeled reference direction.
+- CSV text is quoted consistently, carries a UTF-8 marker, uses portable CRLF rows, and neutralizes formula-leading cells before spreadsheet handoff.
+- JSON selection opens a non-mutating preview that reports added, replaced, removed, and retained records before any confirmation action is available.
+- Unsupported schema, unsafe relationships, size limits, and missing or mismatched attachment bytes are rejected without changing the revision.
+- Import confirmation is bound to the exact previewed payload and current revision. The server validates both again and requires a recovery point before replacement.
+- Checked-in JSON and CSV fixtures, API tests, UI tests, and the supported-limit benchmark cover compatibility and the full preview-confirm path.
 
 ## Later gates
 

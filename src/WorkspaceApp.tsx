@@ -3,9 +3,9 @@ import { marked } from "marked";
 import type { ResizeParams } from "@xyflow/react";
 import { ChangeEvent, DragEvent, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import {
-  createRecoveryPoint, deleteAttachment, importWorkspace, listRecoveryPoints, logout, mapExportUrl,
+  createRecoveryPoint, deleteAttachment, importWorkspace, listRecoveryPoints, logout, mapExportUrl, previewWorkspaceImport,
   purgeTrashedThought, restoreBackup, restoreRecoveryPoint, saveWorkspace, uploadAttachment,
-  type RecoveryPointList,
+  type ImportPreviewResult, type RecoveryPointList,
 } from "./api";
 import { CanvasView } from "./CanvasView";
 import {
@@ -21,6 +21,7 @@ interface Props {
 }
 
 type SaveState = "saved" | "unsaved" | "saving" | "failed";
+type PendingImport = { fileName: string; workspace: unknown | null; result: ImportPreviewResult };
 const TRASH_PAGE_SIZE = 100;
 const taskStatuses: { id: TaskStatus; label: string }[] = [
   { id: "todo", label: "Not started" }, { id: "doing", label: "Doing" }, { id: "waiting", label: "Waiting" },
@@ -43,6 +44,8 @@ export function WorkspaceApp({ initialWorkspace, username, onSignedOut }: Props)
   const [trashOpen, setTrashOpen] = useState(false);
   const [purgingId, setPurgingId] = useState<string | null>(null);
   const [restoring, setRestoring] = useState(false);
+  const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
+  const [importing, setImporting] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [saveError, setSaveError] = useState("");
   const [changeVersion, setChangeVersion] = useState(0);
@@ -374,11 +377,30 @@ export function WorkspaceApp({ initialWorkspace, username, onSignedOut }: Props)
     if (!file) return;
     try {
       if (!await ensureSaved("Save the workspace successfully before importing.")) return;
+      if (file.size > 8 * 1024 * 1024) {
+        setPendingImport({ fileName: file.name, workspace: null, result: { status: "rejected", error: "The JSON file is larger than the 8 MB import limit." } });
+        return;
+      }
       const parsed = JSON.parse(await file.text());
-      const imported = await importWorkspace(parsed, revisionRef.current);
-      adoptWorkspace(imported);
-      setToast(`Imported ${imported.nodes.length} thoughts from ${file.name}.`);
+      const result = await previewWorkspaceImport(parsed, revisionRef.current);
+      setPendingImport({ fileName: file.name, workspace: parsed, result });
+    } catch (error) {
+      const message = error instanceof SyntaxError ? "The selected file does not contain valid JSON." : error instanceof Error ? error.message : "Import preview failed without changing the workspace.";
+      if (error instanceof SyntaxError) setPendingImport({ fileName: file.name, workspace: null, result: { status: "rejected", error: message } });
+      else setToast(message);
+    }
+  }
+
+  async function confirmImport() {
+    if (!pendingImport?.workspace || pendingImport.result.status !== "ready") return;
+    setImporting(true);
+    try {
+      const imported = await importWorkspace(pendingImport.workspace, revisionRef.current, pendingImport.result.confirmation);
+      const fileName = pendingImport.fileName;
+      adoptWorkspace(imported); setPendingImport(null);
+      setToast(`Imported ${imported.nodes.length} thoughts from ${fileName}. A recovery point preserves the previous workspace.`);
     } catch (error) { setToast(error instanceof Error ? error.message : "Import failed without changing the workspace."); }
+    finally { setImporting(false); }
   }
 
   function adoptWorkspace(next: Workspace) {
@@ -491,6 +513,7 @@ export function WorkspaceApp({ initialWorkspace, username, onSignedOut }: Props)
       if (event.key === "Escape") {
         if (quickSwitcherOpen) setQuickSwitcherOpen(false);
         else if (quickCaptureOpen) setQuickCaptureOpen(false);
+        else if (pendingImport && !importing) setPendingImport(null);
         else if (trashOpen && !purgingId) setTrashOpen(false);
         else if (helpOpen) setHelpOpen(false);
         else if (settingsOpen) setSettingsOpen(false);
@@ -500,7 +523,7 @@ export function WorkspaceApp({ initialWorkspace, username, onSignedOut }: Props)
         else { setSelectedId(null); setSelectedGroupId(null); }
         return;
       }
-      if (quickSwitcherOpen || quickCaptureOpen || trashOpen || helpOpen || settingsOpen || exportOpen) return;
+      if (quickSwitcherOpen || quickCaptureOpen || pendingImport || trashOpen || helpOpen || settingsOpen || exportOpen) return;
       if (["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName) || target.isContentEditable) return;
       if (event.repeat && ["n", "q", "tab", "enter"].includes(event.key.toLowerCase())) return;
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") { event.preventDefault(); event.shiftKey ? redo() : undo(); return; }
@@ -569,6 +592,7 @@ export function WorkspaceApp({ initialWorkspace, username, onSignedOut }: Props)
     {settingsOpen && <VisualSettings settings={workspace.settings} onChange={(patch) => mutate((current) => ({ ...current, settings: { ...current.settings, ...patch } }))} onClose={() => setSettingsOpen(false)} />}
     {helpOpen && <HelpDialog onClose={() => setHelpOpen(false)} />}
     {exportOpen && <ExportDialog workspace={workspace} mapId={activeMap.id} focusId={focusId} restoring={restoring} onRestore={handleBackupRestore} onRestoreRecoveryPoint={handleRecoveryPointRestore} onClose={() => setExportOpen(false)} />}
+    {pendingImport && <ImportPreviewDialog pending={pendingImport} importing={importing} onConfirm={confirmImport} onClose={() => setPendingImport(null)} onChooseAnother={() => { setPendingImport(null); window.setTimeout(() => importRef.current?.click(), 0); }} />}
     {quickSwitcherOpen && <QuickSwitcher workspace={workspace} recentLocations={recentLocations} onThought={(id) => { navigateToNode(id); setQuickSwitcherOpen(false); }} onMap={(id) => { navigateToMap(id); setQuickSwitcherOpen(false); }} onClose={() => setQuickSwitcherOpen(false)} />}
     {quickCaptureOpen && <QuickCaptureDialog onCapture={quickCapture} onClose={() => setQuickCaptureOpen(false)} />}
     {trashOpen && <TrashDialog nodes={trashedNodes} maps={workspace.maps} purgingId={purgingId} onRestore={restoreTrashed} onPurge={permanentlyDeleteTrashed} onClose={() => setTrashOpen(false)} />}
@@ -712,6 +736,47 @@ function TrashDialog({ nodes, maps, purgingId, onRestore, onPurge, onClose }: {
   </section></div>;
 }
 
+function ImportPreviewDialog({ pending, importing, onConfirm, onClose, onChooseAnother }: {
+  pending: PendingImport;
+  importing: boolean;
+  onConfirm: () => Promise<void>;
+  onClose: () => void;
+  onChooseAnother: () => void;
+}) {
+  const labels = {
+    maps: "Maps", thoughts: "Thoughts", connections: "Connections", boundaries: "Boundaries",
+    categories: "Categories", attachments: "Attachment references",
+  } as const;
+  const ready = pending.result.status === "ready" ? pending.result : null;
+  return <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && !importing && onClose()}><section className="import-dialog" role="dialog" aria-modal="true" aria-labelledby="import-preview-title">
+    <header><div><span className="eyebrow">Review before replacement</span><h2 id="import-preview-title">JSON import preview</h2></div><button autoFocus aria-label="Close import preview" disabled={importing} onClick={onClose}>×</button></header>
+    <div className={`import-file-status ${ready ? "ready" : "rejected"}`} role="status">
+      <span>{ready ? "✓ READY" : "× REJECTED"}</span><div><strong>{pending.fileName}</strong><small>{ready ? `Validated for revision ${ready.preview.currentRevision}` : pending.result.status === "rejected" ? pending.result.error : "Import rejected."}</small></div>
+    </div>
+    {ready && <>
+      <div className="import-totals" aria-label="Imported workspace totals">
+        <span><strong>{ready.preview.totals.maps.toLocaleString()}</strong> maps</span>
+        <span><strong>{ready.preview.totals.thoughts.toLocaleString()}</strong> active thoughts</span>
+        <span><strong>{ready.preview.totals.tasks.toLocaleString()}</strong> tasks</span>
+        <span><strong>{ready.preview.totals.references.toLocaleString()}</strong> references</span>
+        <span><strong>{ready.preview.totals.trashed.toLocaleString()}</strong> in trash</span>
+        <span><strong>{ready.preview.totals.attachments.toLocaleString()}</strong> attachments</span>
+      </div>
+      <div className="import-change-list" role="table" aria-label="Changes compared with current workspace">
+        <div className="import-change-head" role="row"><span role="columnheader">Record type</span><span role="columnheader">Add</span><span role="columnheader">Replace</span><span role="columnheader">Remove</span><span role="columnheader">Keep</span></div>
+        {(Object.keys(labels) as (keyof typeof labels)[]).map((key) => {
+          const change = ready.preview.changes[key];
+          return <div role="row" key={key}><strong role="cell">{labels[key]}</strong><span role="cell" className={change.added ? "positive" : ""}>+{change.added}</span><span role="cell" className={change.updated ? "changed" : ""}>{change.updated}</span><span role="cell" className={change.removed ? "negative" : ""}>-{change.removed}</span><span role="cell">{change.unchanged}</span></div>;
+        })}
+      </div>
+      {ready.preview.settingsChanged && <p className="import-settings-note">Visual settings will also be replaced by the imported workspace.</p>}
+      <div className="import-warning"><strong>This replaces the complete current workspace.</strong><p>AuDHDMAP will verify this exact file and the current revision again, then create a required server recovery point before writing anything. JSON carries attachment references, not file bytes. Every referenced file was found on this server; use a complete ZIP backup to move attachments between servers.{ready.preview.changes.attachments.removed > 0 ? ` The current copies of ${ready.preview.changes.attachments.removed} removed attachment file${ready.preview.changes.attachments.removed === 1 ? "" : "s"} will be deleted after the workspace commit, while the new recovery point may retain them.` : ""}</p></div>
+    </>}
+    {!ready && <div className="import-rejection"><strong>No workspace data changed.</strong><p>Fix or replace this file, then preview it again. Unsupported schemas, unsafe relationships, size limits, and missing attachment bytes are rejected before mutation.</p></div>}
+    <footer className="import-actions"><button disabled={importing} onClick={onChooseAnother}>Choose another file</button>{ready && <button className="danger-button" disabled={importing} onClick={() => void onConfirm()}>{importing ? "Creating recovery point and importing..." : "Replace workspace with this JSON"}</button>}</footer>
+  </section></div>;
+}
+
 function ExportDialog({ workspace, mapId, focusId, restoring, onRestore, onRestoreRecoveryPoint, onClose }: {
   workspace: Workspace;
   mapId: string;
@@ -760,6 +825,7 @@ function ExportDialog({ workspace, mapId, focusId, restoring, onRestore, onResto
         <a href={mapExportUrl("svg", mapId, focusId)} download><strong>SVG</strong><span>Scalable visual map</span></a>
         <a href={mapExportUrl("md", mapId, focusId)} download><strong>Markdown</strong><span>Structured editable outline</span></a>
         <a href={mapExportUrl("txt", mapId, focusId)} download><strong>Plain text</strong><span>Portable indented outline</span></a>
+        <a href={mapExportUrl("csv", mapId, focusId)} download><strong>Project CSV</strong><span>Hierarchy, tasks, and references</span></a>
       </div>
     </section>
     <section className="export-section"><div className="export-heading"><div><h3>Back up everything</h3><p>The ZIP contains workspace data, every attachment, and SHA-256 integrity checks.</p></div><span>FULL</span></div>
@@ -902,6 +968,7 @@ function HelpDialog({ onClose }: { onClose: () => void }) {
     <p>Buttons remain available when you do not want to use the keyboard. Most shortcuts are ignored while you are typing in a field.</p>
     <dl><div><dt><kbd>Cmd/Ctrl K</kbd></dt><dd>Jump to any map, thought, or task</dd></div><div><dt><kbd>N</kbd></dt><dd>Create and immediately name an unconnected thought</dd></div><div><dt><kbd>Q</kbd></dt><dd>Capture several unconnected thoughts, one per line</dd></div><div><dt><kbd>Tab</kbd></dt><dd>Create and name a child of the selected thought</dd></div><div><dt><kbd>Shift+Tab</kbd></dt><dd>Move the selected thought out one level</dd></div><div><dt><kbd>Enter</kbd></dt><dd>Create and name a sibling</dd></div><div><dt><kbd>F</kbd></dt><dd>Focus or leave the selected branch</dd></div><div><dt><kbd>/</kbd></dt><dd>Search maps and notes</dd></div><div><dt><kbd>Esc</kbd></dt><dd>Close a panel, leave focus, or clear selection</dd></div><div><dt><kbd>Cmd/Ctrl S</kbd></dt><dd>Save the current workspace now</dd></div><div><dt><kbd>Delete</kbd></dt><dd>Move the selected thought to trash or remove a boundary</dd></div><div><dt><kbd>Cmd/Ctrl Z</kbd></dt><dd>Undo the last workspace change</dd></div><div><dt><kbd>Cmd/Ctrl Shift Z</kbd></dt><dd>Redo the last undone change</dd></div><div><dt><kbd>?</kbd></dt><dd>Open this help</dd></div></dl>
     <h3>Canvas basics</h3><p>Double-click empty canvas space to create a thought there. Drag between connection handles to link thoughts on the same map, or use Linked thoughts to connect any two maps. Enclose branch creates an editable boundary around the selected branch. Files and web links can be dropped into the Media panel.</p>
+    <h3>Export and handoff</h3><p>Project CSV keeps hierarchy, tasks, and references for spreadsheet work. JSON import always shows a server-validated change preview before replacement. Use a complete ZIP when attachments must move to another server.</p>
     <button className="primary-button" onClick={onClose}>Back to the map</button>
   </section></div>;
 }

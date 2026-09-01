@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "revision": 0,
+  "maps": [
+    {
+      "id": "map-fixture",
+      "title": "Fixture project",
+      "createdAt": "2026-09-01T12:00:00.000Z",
+      "updatedAt": "2026-09-01T12:00:00.000Z"
+    }
+  ],
+  "categories": [],
+  "nodes": [
+    {
+      "id": "thought-root",
+      "mapId": "map-fixture",
+      "parentId": null,
+      "groupId": null,
+      "title": "Fixture project",
+      "note": "Project note.",
+      "x": 100,
+      "y": 100,
+      "width": 190,
+      "shape": "rounded",
+      "categoryId": null,
+      "tags": ["planning"],
+      "attachments": [],
+      "links": [],
+      "task": null,
+      "trashedAt": null,
+      "createdAt": "2026-09-01T12:00:00.000Z",
+      "updatedAt": "2026-09-01T12:00:00.000Z"
+    },
+    {
+      "id": "thought-task",
+      "mapId": "map-fixture",
+      "parentId": "thought-root",
+      "groupId": null,
+      "title": "Ship fixture",
+      "note": "Task note.",
+      "x": 380,
+      "y": 180,
+      "width": 190,
+      "shape": "rounded",
+      "categoryId": null,
+      "tags": ["delivery", "test"],
+      "attachments": [],
+      "links": [
+        {
+          "id": "link-docs",
+          "url": "https://example.com/docs",
+          "title": "Docs",
+          "createdAt": "2026-09-01T12:00:00.000Z"
+        }
+      ],
+      "task": {
+        "status": "doing",
+        "start": "2026-09-02",
+        "due": "2026-09-05",
+        "progress": 40,
+        "priority": "high",
+        "milestone": true
+      },
+      "trashedAt": null,
+      "createdAt": "2026-09-01T12:00:00.000Z",
+      "updatedAt": "2026-09-01T12:00:00.000Z"
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge-branch",
+      "mapId": "map-fixture",
+      "source": "thought-root",
+      "target": "thought-task",
+      "type": "branch",
+      "label": ""
+    },
+    {
+      "id": "edge-reference",
+      "mapId": "map-fixture",
+      "source": "thought-root",
+      "target": "thought-task",
+      "type": "reference",
+      "label": "supports"
+    }
+  ],
+  "groups": [],
+  "settings": {
+    "theme": "quiet",
+    "snapToGrid": true,
+    "gridSize": 16,
+    "reducedMotion": true,
+    "crtEffects": false,
+    "brightness": 100,
+    "saturation": 100,
+    "lineThickness": 2,
+    "branchFont": "system",
+    "nodeShape": "rounded"
+  }
+}

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.0
+
+- Add current-map and focused-branch project CSV export with stable IDs, hierarchy paths, task fields, tags, notes, web links, attachment metadata, and labeled incoming or outgoing references.
+- Quote CSV consistently, add UTF-8 and CRLF compatibility, and neutralize formula-leading cells before spreadsheet handoff.
+- Replace immediate JSON mutation with a non-mutating preview that reports added, replaced, removed, and retained maps, thoughts, connections, boundaries, categories, and attachment references.
+- Reject unsupported, oversized, unsafe, stale, or attachment-incomplete JSON before mutation, with complete-ZIP guidance when attachment bytes need to move between servers.
+- Bind confirmation to the exact previewed JSON and expected revision, revalidate inside the mutation queue, and require a server recovery point before replacement.
+- Add durable JSON and CSV compatibility fixtures plus server, API, UI, security, stale-revision, attachment-integrity, and exact-confirmation regression coverage.
+- Extend the 10,000-thought benchmark to project CSV and JSON import preview. The measured preview remains below 100 ms on the release development host.
+
 ## 0.5.0
 
 - Add a global `Cmd/Ctrl+K` quick switcher for maps, thoughts, tasks, tags, task states, and recent locations. Recent history remains only in the current browser tab.

@@ -10,6 +10,7 @@ const api = vi.hoisted(() => ({
   importWorkspace: vi.fn(),
   listRecoveryPoints: vi.fn(),
   logout: vi.fn(),
+  previewWorkspaceImport: vi.fn(),
   purgeTrashedThought: vi.fn(),
   restoreBackup: vi.fn(),
   restoreRecoveryPoint: vi.fn(),
@@ -52,6 +53,49 @@ describe("workspace daily-use safeguards", () => {
     api.purgeTrashedThought.mockImplementation(async (_id: string, workspace: Workspace, revision: number) => ({ ...structuredClone(workspace), revision: revision + 1 }));
     api.listRecoveryPoints.mockResolvedValue({ snapshots: [], problems: [], warning: null });
     api.createRecoveryPoint.mockResolvedValue({ snapshot: { id: "snapshot-r0-11111111-1111-4111-8111-111111111111", revision: 0, createdAt: "2026-09-01T12:00:00.000Z", thoughts: 1, trashed: 0, attachments: 0 } });
+  });
+
+  it("previews exact JSON changes before an explicit recovery-protected import", async () => {
+    const imported = fixture(); imported.revision = 1; imported.maps[0].title = "Imported map";
+    const emptyChange = { added: 0, updated: 0, removed: 0, unchanged: 0, total: 0 };
+    api.previewWorkspaceImport.mockResolvedValue({
+      status: "ready", confirmation: "a".repeat(64),
+      preview: {
+        currentRevision: 0, nextRevision: 1,
+        changes: { maps: { ...emptyChange, updated: 1, total: 1 }, thoughts: { ...emptyChange, unchanged: 1, total: 1 }, connections: emptyChange, boundaries: emptyChange, categories: emptyChange, attachments: emptyChange },
+        totals: { maps: 1, thoughts: 1, trashed: 0, tasks: 0, references: 0, attachments: 0 }, settingsChanged: false,
+      },
+    });
+    api.importWorkspace.mockResolvedValue(imported);
+    const rendered = render(<WorkspaceApp initialWorkspace={fixture()} username="owner" onSignedOut={() => {}} />);
+    const input = rendered.container.querySelector<HTMLInputElement>('input[type="file"][accept*="application/json"]')!;
+    const file = new File([JSON.stringify(imported)], "handoff.json", { type: "application/json" });
+    Object.defineProperty(file, "text", { value: async () => JSON.stringify(imported) });
+    fireEvent.change(input, { target: { files: [file] } });
+
+    const dialog = await screen.findByRole("dialog", { name: "JSON import preview" });
+    expect(within(dialog).getByText("✓ READY")).not.toBeNull();
+    expect(within(dialog).getByText("handoff.json")).not.toBeNull();
+    expect(api.previewWorkspaceImport).toHaveBeenCalledWith(imported, 0);
+    expect(api.importWorkspace).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Replace workspace with this JSON" }));
+    await waitFor(() => expect(api.importWorkspace).toHaveBeenCalledWith(imported, 0, "a".repeat(64)));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "JSON import preview" })).toBeNull());
+    expect(screen.getByText(/A recovery point preserves the previous workspace/)).not.toBeNull();
+  });
+
+  it("shows a rejected JSON preview without offering a mutation action", async () => {
+    api.previewWorkspaceImport.mockResolvedValue({ status: "rejected", error: "Unsupported workspace schema version." });
+    const rendered = render(<WorkspaceApp initialWorkspace={fixture()} username="owner" onSignedOut={() => {}} />);
+    const input = rendered.container.querySelector<HTMLInputElement>('input[type="file"][accept*="application/json"]')!;
+    const file = new File(["{}"], "wrong.json", { type: "application/json" });
+    Object.defineProperty(file, "text", { value: async () => "{}" });
+    fireEvent.change(input, { target: { files: [file] } });
+    const dialog = await screen.findByRole("dialog", { name: "JSON import preview" });
+    expect(within(dialog).getByText("× REJECTED")).not.toBeNull();
+    expect(within(dialog).getByText(/Unsupported workspace schema/)).not.toBeNull();
+    expect(within(dialog).queryByRole("button", { name: /Replace workspace/ })).toBeNull();
+    expect(api.importWorkspace).not.toHaveBeenCalled();
   });
 
   it("saves an edited workspace before opening export", async () => {

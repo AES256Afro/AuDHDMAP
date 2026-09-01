@@ -7,7 +7,7 @@ import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import express from "express";
 import { prepareBackup, restoreBackupArchive, writeBackupArchive } from "./backup.mjs";
-import { renderMapMarkdown, renderMapPdf, renderMapSvg, renderMapText, safeExportSlug } from "./exports.mjs";
+import { renderMapCsv, renderMapMarkdown, renderMapPdf, renderMapSvg, renderMapText, safeExportSlug } from "./exports.mjs";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const defaultDist = path.join(packageRoot, "dist");
@@ -124,7 +124,7 @@ export function createApp({
     if (request.secure) response.setHeader("Strict-Transport-Security", "max-age=31536000");
     next();
   });
-  app.use(express.json({ limit: "3mb" }));
+  app.use(express.json({ limit: "8mb" }));
 
   function requireApplicationRequest(request, response, next) {
     if (["GET", "HEAD", "OPTIONS"].includes(request.method) || request.get("x-audhdmap-request") === "1") return next();
@@ -290,16 +290,34 @@ export function createApp({
         response.setHeader("Content-Disposition", `attachment; filename="${slug}.txt"`);
         return response.send(renderMapText(workspace, mapId, focus?.id ?? null));
       }
+      if (request.params.format === "csv") {
+        response.setHeader("Content-Type", "text/csv; charset=utf-8");
+        response.setHeader("Content-Disposition", `attachment; filename="${slug}-project-handoff.csv"`);
+        return response.send(renderMapCsv(workspace, mapId, focus?.id ?? null));
+      }
       response.status(404).json({ error: "That export format is not available." });
     } catch (error) { next(error); }
+  });
+
+  app.post("/api/import/preview", requireAuth, async (request, response) => {
+    const expectedRevision = Number(request.body?.expectedRevision);
+    const candidate = request.body?.workspace?.workspace ?? request.body?.workspace;
+    try {
+      response.setHeader("Cache-Control", "private, no-store");
+      response.json(await store.previewImport(candidate, expectedRevision));
+    } catch (error) {
+      if (error.code === "REVISION_CONFLICT") return response.status(409).json({ error: error.message, workspace: error.current });
+      response.status(422).json({ status: "rejected", error: error.message || "The JSON file is not a supported AuDHDMAP workspace." });
+    }
   });
 
   app.post("/api/import", requireAuth, async (request, response) => {
     const expectedRevision = Number(request.body?.expectedRevision);
     const candidate = request.body?.workspace?.workspace ?? request.body?.workspace;
-    try { response.json(await store.replace(candidate, expectedRevision)); }
+    try { response.json(await store.replaceImported(candidate, expectedRevision, request.body?.confirmation)); }
     catch (error) {
       if (error.code === "REVISION_CONFLICT") return response.status(409).json({ error: error.message, workspace: error.current });
+      if (error.code === "SNAPSHOT_FAILED" || error.code === "IMPORT_NOT_PREVIEWED") return response.status(409).json({ error: error.message });
       response.status(400).json({ error: error.message });
     }
   });
