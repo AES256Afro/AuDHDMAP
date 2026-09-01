@@ -3,6 +3,7 @@ import { access, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises
 import { constants } from "node:fs";
 import path from "node:path";
 import { defaultWorkspace } from "./default-workspace.mjs";
+import { createSnapshotManager } from "./snapshots.mjs";
 
 const idPattern = /^[A-Za-z0-9][A-Za-z0-9_-]{0,95}$/;
 const hexColor = /^#[0-9a-fA-F]{6}$/;
@@ -199,13 +200,38 @@ export function normalizeWorkspace(raw, { revision = 0 } = {}) {
   };
 }
 
-export function createWorkspaceStore({ dataDirectory, now = () => new Date() }) {
+export function createWorkspaceStore({ dataDirectory, now = () => new Date(), snapshotIntervalMs = 5 * 60_000, maximumSnapshots = 10 }) {
   if (!dataDirectory) throw new Error("dataDirectory is required");
   const workspacePath = path.join(dataDirectory, "workspace.json");
   const attachmentDirectory = path.join(dataDirectory, "attachments");
   const restoreStatePath = path.join(dataDirectory, ".restore-state.json");
   let queue = Promise.resolve();
   let currentDocument = null;
+  let lastSnapshotWarning = "";
+  const snapshots = createSnapshotManager({
+    dataDirectory,
+    attachmentDirectory,
+    normalizeWorkspace,
+    now,
+    intervalMs: snapshotIntervalMs,
+    maximumSnapshots,
+  });
+
+  async function captureSnapshot(document, { force = false, required = false } = {}) {
+    try {
+      const entry = await snapshots.capture(document, { force });
+      if (entry) lastSnapshotWarning = "";
+      return entry;
+    } catch (error) {
+      lastSnapshotWarning = error instanceof Error ? error.message : "AuDHDMAP could not create a recovery point.";
+      if (required) {
+        const failure = new Error(`AuDHDMAP could not create a recovery point before changing stored data. ${lastSnapshotWarning}`);
+        failure.code = "SNAPSHOT_FAILED";
+        throw failure;
+      }
+      return null;
+    }
+  }
 
   async function writeAtomic(document) {
     const temporary = `${workspacePath}.${randomUUID()}.tmp`;
@@ -269,6 +295,7 @@ export function createWorkspaceStore({ dataDirectory, now = () => new Date() }) 
     const clean = normalizeWorkspace(stored, { revision: Number.isInteger(stored.revision) ? stored.revision : 0 });
     await writeAtomic(clean);
     currentDocument = clean;
+    await snapshots.initialize();
     return structuredClone(clean);
   }
 
@@ -285,6 +312,7 @@ export function createWorkspaceStore({ dataDirectory, now = () => new Date() }) 
         error.code = "REVISION_CONFLICT"; error.current = current; throw error;
       }
       const next = normalizeWorkspace(raw, { revision: current.revision + 1 });
+      await captureSnapshot(current);
       await writeAtomic(next);
       currentDocument = next;
       return structuredClone(next);
@@ -309,6 +337,7 @@ export function createWorkspaceStore({ dataDirectory, now = () => new Date() }) 
       const next = normalizeWorkspace(raw, { revision: current.revision + 1 });
       const nextReferences = next.nodes.some((node) => node.attachments.some((attachment) => attachment.id === attachmentId));
       if (nextReferences) throw new Error("Remove the attachment from the workspace before deleting its data.");
+      await captureSnapshot(current, { force: true, required: true });
       await writeAtomic(next);
       currentDocument = next;
       await rm(path.join(attachmentDirectory, attachmentId), { force: true }).catch(() => {});
@@ -343,6 +372,7 @@ export function createWorkspaceStore({ dataDirectory, now = () => new Date() }) 
       if (next.nodes.some((node) => node.attachments.some((attachment) => attachmentIds.has(attachment.id)))) {
         throw new Error("Remove the thought's attachments from workspace metadata before permanently deleting it.");
       }
+      await captureSnapshot(current, { force: true, required: true });
       await writeAtomic(next);
       currentDocument = next;
       await Promise.all([...attachmentIds].map((attachmentId) => rm(path.join(attachmentDirectory, attachmentId), { force: true }).catch(() => {})));
@@ -352,6 +382,32 @@ export function createWorkspaceStore({ dataDirectory, now = () => new Date() }) 
     return work;
   }
 
+  async function replaceWithStagedAttachments(current, raw, stagedAttachmentDirectory) {
+    await access(stagedAttachmentDirectory, constants.R_OK | constants.W_OK);
+    const next = normalizeWorkspace(raw, { revision: current.revision + 1 });
+    await captureSnapshot(current, { force: true, required: true });
+    const previousDirectory = path.join(dataDirectory, `.attachments-previous-${randomUUID()}`);
+    await writeRestoreState({ previousDirectory: path.basename(previousDirectory), targetRevision: next.revision });
+    let previousMoved = false;
+    let stagedMoved = false;
+    try {
+      await rename(attachmentDirectory, previousDirectory); previousMoved = true;
+      await rename(stagedAttachmentDirectory, attachmentDirectory);
+      stagedMoved = true;
+      await writeAtomic(next);
+    } catch (error) {
+      let rolledBack = true;
+      if (stagedMoved) await rm(attachmentDirectory, { recursive: true, force: true }).catch(() => { rolledBack = false; });
+      if (previousMoved) await rename(previousDirectory, attachmentDirectory).catch(() => { rolledBack = false; });
+      if (rolledBack) await rm(restoreStatePath, { force: true }).catch(() => {});
+      throw error;
+    }
+    currentDocument = next;
+    await rm(previousDirectory, { recursive: true, force: true }).catch(() => {});
+    await rm(restoreStatePath, { force: true }).catch(() => {});
+    return structuredClone(next);
+  }
+
   async function restore(raw, expectedRevision, stagedAttachmentDirectory) {
     const work = queue.then(async () => {
       const current = await read();
@@ -359,28 +415,41 @@ export function createWorkspaceStore({ dataDirectory, now = () => new Date() }) 
         const error = new Error("Workspace changed in another session. Reload before restoring a backup.");
         error.code = "REVISION_CONFLICT"; error.current = current; throw error;
       }
-      await access(stagedAttachmentDirectory, constants.R_OK | constants.W_OK);
-      const next = normalizeWorkspace(raw, { revision: current.revision + 1 });
-      const previousDirectory = path.join(dataDirectory, `.attachments-previous-${randomUUID()}`);
-      await writeRestoreState({ previousDirectory: path.basename(previousDirectory), targetRevision: next.revision });
-      let previousMoved = false;
-      let stagedMoved = false;
-      try {
-        await rename(attachmentDirectory, previousDirectory); previousMoved = true;
-        await rename(stagedAttachmentDirectory, attachmentDirectory);
-        stagedMoved = true;
-        await writeAtomic(next);
-      } catch (error) {
-        let rolledBack = true;
-        if (stagedMoved) await rm(attachmentDirectory, { recursive: true, force: true }).catch(() => { rolledBack = false; });
-        if (previousMoved) await rename(previousDirectory, attachmentDirectory).catch(() => { rolledBack = false; });
-        if (rolledBack) await rm(restoreStatePath, { force: true }).catch(() => {});
-        throw error;
+      return replaceWithStagedAttachments(current, raw, stagedAttachmentDirectory);
+    });
+    queue = work.catch(() => {});
+    return work;
+  }
+
+  async function listSnapshots() {
+    const state = await snapshots.list();
+    return { ...state, warning: lastSnapshotWarning || null };
+  }
+
+  async function createSnapshot(expectedRevision) {
+    const work = queue.then(async () => {
+      const current = await read();
+      if (current.revision !== expectedRevision) {
+        const error = new Error("Workspace changed in another session. Reload before creating a recovery point.");
+        error.code = "REVISION_CONFLICT"; error.current = current; throw error;
       }
-      currentDocument = next;
-      await rm(previousDirectory, { recursive: true, force: true }).catch(() => {});
-      await rm(restoreStatePath, { force: true }).catch(() => {});
-      return structuredClone(next);
+      const snapshot = await captureSnapshot(current, { force: true, required: true });
+      return snapshot;
+    });
+    queue = work.catch(() => {});
+    return work;
+  }
+
+  async function restoreSnapshot(id, expectedRevision) {
+    const work = queue.then(async () => {
+      const current = await read();
+      if (current.revision !== expectedRevision) {
+        const error = new Error("Workspace changed in another session. Reload before restoring a recovery point.");
+        error.code = "REVISION_CONFLICT"; error.current = current; throw error;
+      }
+      const staged = await snapshots.stage(id);
+      try { return await replaceWithStagedAttachments(current, staged.workspace, staged.stagedAttachmentDirectory); }
+      finally { await rm(staged.stagedAttachmentDirectory, { recursive: true, force: true }); }
     });
     queue = work.catch(() => {});
     return work;
@@ -390,8 +459,20 @@ export function createWorkspaceStore({ dataDirectory, now = () => new Date() }) 
     await access(dataDirectory, constants.R_OK | constants.W_OK);
     const workspace = await read();
     const trashed = workspace.nodes.filter((node) => node.trashedAt).length;
-    return { revision: workspace.revision, maps: workspace.maps.length, nodes: workspace.nodes.length - trashed, trashed };
+    const snapshotStatus = snapshots.status();
+    return {
+      revision: workspace.revision,
+      maps: workspace.maps.length,
+      nodes: workspace.nodes.length - trashed,
+      trashed,
+      snapshots: snapshotStatus.snapshots,
+      snapshotProblems: snapshotStatus.snapshotProblems + (lastSnapshotWarning ? 1 : 0),
+    };
   }
 
-  return { initialize, read, replace, removeAttachment, purgeTrashedNode, restore, readiness, dataDirectory, workspacePath, attachmentDirectory };
+  return {
+    initialize, read, replace, removeAttachment, purgeTrashedNode, restore,
+    listSnapshots, createSnapshot, restoreSnapshot, readiness,
+    dataDirectory, workspacePath, attachmentDirectory, snapshotDirectory: snapshots.root,
+  };
 }

@@ -1,15 +1,18 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WorkspaceApp } from "./WorkspaceApp";
 import type { Workspace } from "./model";
 
 const api = vi.hoisted(() => ({
+  createRecoveryPoint: vi.fn(),
   deleteAttachment: vi.fn(),
   importWorkspace: vi.fn(),
+  listRecoveryPoints: vi.fn(),
   logout: vi.fn(),
   purgeTrashedThought: vi.fn(),
   restoreBackup: vi.fn(),
+  restoreRecoveryPoint: vi.fn(),
   saveWorkspace: vi.fn(),
   uploadAttachment: vi.fn(),
 }));
@@ -47,6 +50,8 @@ describe("workspace daily-use safeguards", () => {
     api.saveWorkspace.mockImplementation(async (workspace: Workspace, revision: number) => ({ ...structuredClone(workspace), revision: revision + 1 }));
     api.deleteAttachment.mockImplementation(async (_id: string, workspace: Workspace, revision: number) => ({ ...structuredClone(workspace), revision: revision + 1 }));
     api.purgeTrashedThought.mockImplementation(async (_id: string, workspace: Workspace, revision: number) => ({ ...structuredClone(workspace), revision: revision + 1 }));
+    api.listRecoveryPoints.mockResolvedValue({ snapshots: [], problems: [], warning: null });
+    api.createRecoveryPoint.mockResolvedValue({ snapshot: { id: "snapshot-r0-11111111-1111-4111-8111-111111111111", revision: 0, createdAt: "2026-09-01T12:00:00.000Z", thoughts: 1, trashed: 0, attachments: 0 } });
   });
 
   it("saves an edited workspace before opening export", async () => {
@@ -84,12 +89,66 @@ describe("workspace daily-use safeguards", () => {
     expect(screen.getAllByDisplayValue("New thought")).toHaveLength(1);
   });
 
+  it("jumps to maps, thoughts, and tasks with Cmd or Ctrl K and keeps tab-local recents", async () => {
+    const workspace = fixture();
+    const now = "2026-09-01T13:00:00.000Z";
+    workspace.maps.push({ id: "map-two", title: "Remote office", createdAt: now, updatedAt: now });
+    workspace.nodes.push({
+      id: "node-remote", mapId: "map-two", parentId: null, groupId: null, title: "Rotate VPN keys", note: "Security maintenance", x: 100, y: 100, width: 190,
+      shape: "rounded", categoryId: null, tags: ["security"], attachments: [], links: [], task: { status: "doing", start: "", due: "", progress: 25, priority: "high", milestone: false },
+      trashedAt: null, createdAt: now, updatedAt: now,
+    });
+    render(<WorkspaceApp initialWorkspace={workspace} username="owner" onSignedOut={() => {}} />);
+    const title = screen.getByDisplayValue("Root thought");
+    fireEvent.keyDown(title, { key: "k", ctrlKey: true });
+    const switcher = await screen.findByRole("dialog", { name: "Jump anywhere" });
+    const query = screen.getByRole("textbox", { name: "Search maps, thoughts, and tasks" });
+    fireEvent.change(query, { target: { value: "vpn doing" } });
+    expect(await within(switcher).findByRole("option", { name: /Rotate VPN keys/ })).not.toBeNull();
+    fireEvent.keyDown(query, { key: "Enter" });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Jump anywhere" })).toBeNull());
+    expect(screen.getByDisplayValue("Rotate VPN keys")).not.toBeNull();
+
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    const reopened = await screen.findByRole("dialog", { name: "Jump anywhere" });
+    const recent = within(reopened).getAllByRole("option");
+    expect(recent[0].textContent).toContain("Rotate VPN keys");
+  });
+
   it("closes the export dialog with Escape", async () => {
     render(<WorkspaceApp initialWorkspace={fixture()} username="owner" onSignedOut={() => {}} />);
     fireEvent.click(screen.getByRole("button", { name: /Export/ }));
     await screen.findByRole("dialog", { name: "Export and recovery" });
     fireEvent.keyDown(window, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Export and recovery" })).toBeNull());
+  });
+
+  it("creates and refreshes server-local recovery points", async () => {
+    const point = { id: "snapshot-r0-11111111-1111-4111-8111-111111111111", revision: 0, createdAt: "2026-09-01T12:00:00.000Z", thoughts: 1, trashed: 0, attachments: 0 };
+    api.listRecoveryPoints.mockResolvedValueOnce({ snapshots: [], problems: [], warning: null }).mockResolvedValue({ snapshots: [point], problems: [], warning: null });
+    render(<WorkspaceApp initialWorkspace={fixture()} username="owner" onSignedOut={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: /Export/ }));
+    await screen.findByText(/No recovery points yet/);
+    fireEvent.click(screen.getByRole("button", { name: /Save current point/ }));
+    await waitFor(() => expect(api.createRecoveryPoint).toHaveBeenCalledWith(0));
+    expect(await screen.findByText(/Revision 0/)).not.toBeNull();
+    expect(api.listRecoveryPoints).toHaveBeenCalledTimes(2);
+  });
+
+  it("requires confirmation before restoring a server recovery point", async () => {
+    const point = { id: "snapshot-r0-11111111-1111-4111-8111-111111111111", revision: 0, createdAt: "2026-09-01T12:00:00.000Z", thoughts: 1, trashed: 0, attachments: 0 };
+    api.listRecoveryPoints.mockResolvedValue({ snapshots: [point], problems: [], warning: null });
+    const restored = fixture(); restored.revision = 1; restored.maps[0].title = "Recovered map";
+    api.restoreRecoveryPoint.mockResolvedValue(restored);
+    render(<WorkspaceApp initialWorkspace={fixture()} username="owner" onSignedOut={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: /Export/ }));
+    await screen.findByText(/Revision 0/);
+    fireEvent.click(screen.getByRole("button", { name: "Restore" }));
+    expect(api.restoreRecoveryPoint).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm replace" }));
+    await waitFor(() => expect(api.restoreRecoveryPoint).toHaveBeenCalledWith(point.id, 0));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Export and recovery" })).toBeNull());
+    expect(screen.getByText(/Restored server recovery point as revision 1/)).not.toBeNull();
   });
 
   it("captures multiple lines as one undoable batch", async () => {

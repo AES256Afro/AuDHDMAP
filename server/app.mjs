@@ -206,6 +206,36 @@ export function createApp({
     }
   });
 
+  app.get("/api/snapshots", requireAuth, async (_request, response) => {
+    response.setHeader("Cache-Control", "private, no-store");
+    response.json(await store.listSnapshots());
+  });
+
+  app.post("/api/snapshots", requireAuth, async (request, response) => {
+    const expectedRevision = Number(request.body?.expectedRevision);
+    try {
+      response.setHeader("Cache-Control", "private, no-store");
+      response.json({ snapshot: await store.createSnapshot(expectedRevision) });
+    } catch (error) {
+      if (error.code === "REVISION_CONFLICT") return response.status(409).json({ error: error.message, workspace: error.current });
+      if (error.code === "SNAPSHOT_FAILED") return response.status(409).json({ error: error.message });
+      response.status(400).json({ error: error.message || "The recovery point could not be created." });
+    }
+  });
+
+  app.post("/api/snapshots/:id/restore", requireAuth, async (request, response) => {
+    const expectedRevision = Number(request.body?.expectedRevision);
+    try {
+      response.setHeader("Cache-Control", "private, no-store");
+      response.json(await store.restoreSnapshot(request.params.id, expectedRevision));
+    } catch (error) {
+      if (error.code === "REVISION_CONFLICT") return response.status(409).json({ error: error.message, workspace: error.current });
+      if (error.code === "SNAPSHOT_NOT_FOUND") return response.status(404).json({ error: error.message });
+      if (error.code === "SNAPSHOT_FAILED") return response.status(409).json({ error: error.message });
+      response.status(400).json({ error: error.message || "The recovery point could not be restored." });
+    }
+  });
+
   app.get("/api/export", requireAuth, async (_request, response) => {
     const workspace = await store.read();
     const exportedWorkspace = ordinaryExportWorkspace(workspace);

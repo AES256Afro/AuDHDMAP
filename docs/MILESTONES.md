@@ -44,11 +44,17 @@ Status: shipped
 
 ## 0.5.0 - Large-workspace navigation and snapshots
 
-Status: dependent on 0.4.0 recovery behavior
+Status: shipped
 
-- A keyboard quick switcher jumps between maps, thoughts, tasks, and recent work without changing layout.
-- Large-map canvas and structured views virtualize or progressively reveal content where DOM volume, not data traversal, becomes the bottleneck.
-- Automatic local snapshots provide recovery points beyond the current tab's undo history.
+Acceptance criteria:
+
+- `Cmd/Ctrl+K` opens a keyboard-operated switcher that finds maps, thoughts, tags, and tasks, supports arrow-key selection, and keeps recent locations only in tab memory.
+- The canvas renders only visible graph elements. Outline, Board, Timeline, Gantt, references, and Trash start with bounded DOM pages and reveal more only by explicit action.
+- Up to 10 recovery points remain under `/data/snapshots`. Ordinary edits capture the preceding revision at most once every five minutes, while manual capture and destructive operations force the current revision.
+- Permanent thought deletion, attachment deletion, and either restore path fail closed if the current state cannot first be captured.
+- Recovery point restore is revision checked, validates the point before mutation, stages attachment bytes, uses the crash-recoverable directory swap, and increments the current revision.
+- Corrupt points are reported without blocking the healthy live workspace. Existing backup and snapshot retention is disclosed anywhere permanent deletion is offered.
+- Supported-limit tests and benchmarks cover 10,000 thoughts, progressive view rendering, recovery capture, recovery listing, recovery restore, stale revisions, unsafe point metadata, and attachment restoration.
 
 ## 0.6.0 - Interoperable project handoff
 

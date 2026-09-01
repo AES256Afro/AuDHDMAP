@@ -1,7 +1,8 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, lazy, Suspense, useEffect, useState } from "react";
 import { loadWorkspace, login, session } from "./api";
 import type { Workspace } from "./model";
-import { WorkspaceApp } from "./WorkspaceApp";
+
+const WorkspaceApp = lazy(() => import("./WorkspaceApp").then((module) => ({ default: module.WorkspaceApp })));
 
 type RootState =
   | { kind: "loading" }
@@ -26,7 +27,7 @@ export function Root() {
   if (state.kind === "loading") return <div className="boot-screen"><div className="boot-mark">AuDHDMAP</div><span>Opening your workspace...</span></div>;
   if (state.kind === "error") return <div className="boot-screen error-screen"><div className="boot-mark">AuDHDMAP</div><strong>Could not open the workspace</strong><p>{state.message}</p><button onClick={() => location.reload()}>Try again</button></div>;
   if (state.kind === "login") return <LoginScreen initialError={state.error} onReady={(workspace, username) => setState({ kind: "ready", workspace, username })} />;
-  return <WorkspaceApp initialWorkspace={state.workspace} username={state.username} onSignedOut={() => setState({ kind: "login" })} />;
+  return <Suspense fallback={<div className="boot-screen"><div className="boot-mark">AuDHDMAP</div><span>Preparing the visual workspace...</span></div>}><WorkspaceApp initialWorkspace={state.workspace} username={state.username} onSignedOut={() => setState({ kind: "login" })} /></Suspense>;
 }
 
 function LoginScreen({ initialError, onReady }: { initialError?: string; onReady: (workspace: Workspace, username: string) => void }) {

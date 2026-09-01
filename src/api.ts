@@ -2,6 +2,21 @@ import type { Attachment, Workspace } from "./model";
 
 const mutationHeaders = { "x-audhdmap-request": "1" };
 
+export interface RecoveryPoint {
+  id: string;
+  revision: number;
+  createdAt: string;
+  thoughts: number;
+  trashed: number;
+  attachments: number;
+}
+
+export interface RecoveryPointList {
+  snapshots: RecoveryPoint[];
+  problems: { id: string; error: string }[];
+  warning: string | null;
+}
+
 async function parse<T>(response: Response): Promise<T> {
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body.error || `Request failed with status ${response.status}.`);
@@ -33,6 +48,26 @@ export async function saveWorkspace(workspace: Workspace, expectedRevision: numb
     method: "PUT",
     headers: { "Content-Type": "application/json", ...mutationHeaders },
     body: JSON.stringify({ workspace, expectedRevision }),
+  }));
+}
+
+export async function listRecoveryPoints() {
+  return parse<RecoveryPointList>(await fetch("/api/snapshots", { cache: "no-store" }));
+}
+
+export async function createRecoveryPoint(expectedRevision: number) {
+  return parse<{ snapshot: RecoveryPoint }>(await fetch("/api/snapshots", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...mutationHeaders },
+    body: JSON.stringify({ expectedRevision }),
+  }));
+}
+
+export async function restoreRecoveryPoint(id: string, expectedRevision: number) {
+  return parse<Workspace>(await fetch(`/api/snapshots/${encodeURIComponent(id)}/restore`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...mutationHeaders },
+    body: JSON.stringify({ expectedRevision }),
   }));
 }
 

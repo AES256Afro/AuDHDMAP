@@ -59,6 +59,15 @@ try {
   const saveStarted = performance.now();
   await store.replace(normalized.value, 0);
   const saveMilliseconds = performance.now() - saveStarted;
+  const snapshotStarted = performance.now();
+  const recoveryPoint = await store.createSnapshot(1);
+  const snapshotMilliseconds = performance.now() - snapshotStarted;
+  const snapshotListStarted = performance.now();
+  const recoveryPoints = await store.listSnapshots();
+  const snapshotListMilliseconds = performance.now() - snapshotListStarted;
+  const restoreStarted = performance.now();
+  await store.restoreSnapshot(recoveryPoint.id, 1);
+  const snapshotRestoreMilliseconds = performance.now() - restoreStarted;
   const readStarted = performance.now();
   for (let index = 0; index < 20; index += 1) await store.read();
   const cachedReadMilliseconds = performance.now() - readStarted;
@@ -73,10 +82,14 @@ try {
     deepChainTextMilliseconds: Number(deepText.milliseconds.toFixed(1)),
     deepChainTextBytes: Buffer.byteLength(deepText.value),
     saveMilliseconds: Number(saveMilliseconds.toFixed(1)),
+    recoveryPointMilliseconds: Number(snapshotMilliseconds.toFixed(1)),
+    recoveryPointListMilliseconds: Number(snapshotListMilliseconds.toFixed(1)),
+    recoveryPointRestoreMilliseconds: Number(snapshotRestoreMilliseconds.toFixed(1)),
+    recoveryPoints: recoveryPoints.snapshots.length,
     twentyDetachedReadsMilliseconds: Number(cachedReadMilliseconds.toFixed(1)),
   };
   console.log(JSON.stringify(report, null, 2));
-  if (normalized.milliseconds > 2_000 || markdown.milliseconds > 2_000 || trashFilteredMarkdown.milliseconds > 2_000 || deepNormalized.milliseconds > 2_000 || deepText.milliseconds > 2_000 || saveMilliseconds > 5_000 || cachedReadMilliseconds > 5_000) {
+  if (normalized.milliseconds > 2_000 || markdown.milliseconds > 2_000 || trashFilteredMarkdown.milliseconds > 2_000 || deepNormalized.milliseconds > 2_000 || deepText.milliseconds > 2_000 || saveMilliseconds > 5_000 || snapshotMilliseconds > 5_000 || snapshotListMilliseconds > 5_000 || snapshotRestoreMilliseconds > 5_000 || cachedReadMilliseconds > 5_000) {
     throw new Error("A supported-limit performance budget was exceeded.");
   }
 } finally {

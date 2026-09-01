@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.5.0
+
+- Add a global `Cmd/Ctrl+K` quick switcher for maps, thoughts, tasks, tags, task states, and recent locations. Recent history remains only in the current browser tab.
+- Add server-local recovery points under `/data/snapshots`, with manual capture, automatic pre-change capture, a five-minute ordinary-save cadence, and a retention limit of 10 valid points.
+- Force a valid recovery point before permanent thought deletion, attachment deletion, complete-backup restore, or local-point restore. A safety-copy failure blocks destructive work without changing the current revision.
+- Validate recovery point layout, manifest identity, workspace schema and revision, attachment inventory, regular-file types, and exact file sizes before listing or restoring a point.
+- Add revision-checked recovery APIs and a two-step restore interface that preserves the state from immediately before restore.
+- Clarify that permanent deletion removes current workspace data while existing downloaded backups and server recovery points may retain copies.
+- Render Outline, Board, Timeline, Gantt, reference lists, and Trash in bounded progressive pages while preserving complete counts and explicit Show more controls.
+- Enable viewport-only React Flow rendering for large canvases.
+- Split the authenticated workspace bundle from the boot and login shell, reducing initial JavaScript from about 510 KB to about 197 KB before compression.
+- Extend supported-limit benchmarks to recovery-point creation, inspection, and restoration at 10,000 thoughts.
+
 ## 0.4.0
 
 - Add multi-line quick capture from the `Q` shortcut or canvas, creating one unconnected thought per non-empty line as a single undoable batch.

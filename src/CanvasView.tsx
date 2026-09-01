@@ -156,6 +156,7 @@ function CanvasInner(props: CanvasProps) {
     }}
     nodesDraggable
     nodesConnectable
+    onlyRenderVisibleElements
     elementsSelectable
     elevateNodesOnSelect={false}
     deleteKeyCode={null}

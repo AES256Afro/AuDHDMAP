@@ -93,6 +93,36 @@ describe("AuDHDMAP API", () => {
     expect((await stale.json()).error).toMatch(/another session/i);
   });
 
+  it("creates, lists, and revision-checks server-local recovery points", async () => {
+    const { base } = await setup();
+    expect((await fetch(`${base}/api/snapshots`)).status).toBe(401);
+    const { cookie } = await signIn(base);
+    const headers = { cookie, "content-type": "application/json", "x-audhdmap-request": "1" };
+    const workspace = await (await fetch(`${base}/api/workspace`, { headers: { cookie } })).json();
+    workspace.maps[0].title = "Keep this revision";
+    const revisionOne = await (await fetch(`${base}/api/workspace`, { method: "PUT", headers, body: JSON.stringify({ workspace, expectedRevision: 0 }) })).json();
+    const created = await fetch(`${base}/api/snapshots`, { method: "POST", headers, body: JSON.stringify({ expectedRevision: 1 }) });
+    expect(created.status).toBe(200);
+    const point = (await created.json()).snapshot;
+    expect(point).toMatchObject({ revision: 1 });
+
+    revisionOne.maps[0].title = "Change after recovery point";
+    const revisionTwo = await (await fetch(`${base}/api/workspace`, { method: "PUT", headers, body: JSON.stringify({ workspace: revisionOne, expectedRevision: 1 }) })).json();
+    const stale = await fetch(`${base}/api/snapshots/${point.id}/restore`, { method: "POST", headers, body: JSON.stringify({ expectedRevision: 1 }) });
+    expect(stale.status).toBe(409);
+    const restored = await fetch(`${base}/api/snapshots/${point.id}/restore`, { method: "POST", headers, body: JSON.stringify({ expectedRevision: revisionTwo.revision }) });
+    expect(restored.status).toBe(200);
+    const restoredWorkspace = await restored.json();
+    expect(restoredWorkspace.revision).toBe(3);
+    expect(restoredWorkspace.maps[0].title).toBe("Keep this revision");
+
+    const listed = await fetch(`${base}/api/snapshots`, { headers: { cookie } });
+    expect(listed.headers.get("cache-control")).toBe("private, no-store");
+    expect((await listed.json()).snapshots.map((snapshot) => snapshot.revision)).toEqual(expect.arrayContaining([0, 1, 2]));
+    const missing = await fetch(`${base}/api/snapshots/not-a-recovery-point/restore`, { method: "POST", headers, body: JSON.stringify({ expectedRevision: 3 }) });
+    expect(missing.status).toBe(404);
+  });
+
   it("uploads an attachment but does not expose it until workspace metadata references it", async () => {
     const { base } = await setup(); const { cookie } = await signIn(base);
     const uploaded = await fetch(`${base}/api/attachments`, { method: "POST", headers: { cookie, "content-type": "application/octet-stream", "x-audhdmap-request": "1", "x-file-name": "notes.txt", "x-file-type": "text/plain" }, body: "hello" });

@@ -2,7 +2,7 @@
 
 ## Intended boundary
 
-AuDHDMAP 0.4.0 is a private, single-owner application. It is suitable for a trusted individual or household behind BoxPilot, a private network, a VPN, or a carefully configured HTTPS reverse proxy. It is not a multi-tenant collaboration service and does not implement per-map roles, public sharing, or anonymous write access.
+AuDHDMAP 0.5.0 is a private, single-owner application. It is suitable for a trusted individual or household behind BoxPilot, a private network, a VPN, or a carefully configured HTTPS reverse proxy. It is not a multi-tenant collaboration service and does not implement per-map roles, public sharing, or anonymous write access.
 
 ## Controls in this release
 
@@ -20,6 +20,9 @@ AuDHDMAP 0.4.0 is a private, single-owner application. It is suitable for a trus
 - Backup restore rejects unsafe or unexpected paths, duplicate entries, excessive entry counts, excessive expanded bytes, oversized files, invalid manifests, inventory mismatches, metadata mismatches, and checksum failures before mutation.
 - Persistence uses private permissions, unique temporary files, atomic workspace renames, revision checks, a serialized mutation queue, and crash recovery for the restore swap.
 - Thought deletion is recoverable by default. Permanent deletion is accepted only for an already-trashed record at the current revision; metadata commits before attachment bytes are removed, and in-tab history is cleared so undo cannot resurrect dangling metadata.
+- Server recovery points use a fixed identifier format, private directories, fixed top-level layout, regular-file and symlink checks, manifest and revision matching, normalized workspace data, exact attachment inventory and size validation, atomic staging, and bounded retention.
+- Permanent thought deletion, attachment deletion, and both restore paths fail closed unless the current revision has a valid recovery point. Recovery restore itself remains revision checked and uses the crash-recoverable attachment swap.
+- Recovery API routes require an owner session. Mutating recovery routes also require the application request header, and recovery responses are marked private and no-store.
 - Dependencies are lockfile-pinned. The optional `fsevents` install script is explicitly denied, the package tree has verified registry signatures, and the release gate runs the production dependency audit.
 
 ## Operator responsibilities
@@ -31,10 +34,12 @@ AuDHDMAP 0.4.0 is a private, single-owner application. It is suitable for a trus
 - Keep versioned portable backups and test restore on separate storage.
 - Update to maintained version tags after reviewing release notes and completing a backup.
 - Treat exported JSON, Markdown, text, SVG, PDF, and ZIP files as private data. They can contain notes, tasks, URLs, filenames, and other workspace content.
+- Treat `/data/snapshots` as private retained history. Permanent deletion from the current workspace does not erase existing recovery points, downloaded backups, or infrastructure snapshots.
+- Monitor `/data` free space. A filesystem without hard-link support uses copy fallback for recovery attachments, and a full volume can intentionally block destructive operations.
 
 ## Deliberate exclusions
 
-This release does not provide end-to-end encryption, client-side encrypted storage, password recovery, hardware-key login, session revocation across devices, audit logs, per-user authorization, public links, or real-time collaboration. Disk encryption, host security, TLS certificates, retention, and off-host backup protection remain infrastructure responsibilities.
+This release does not provide end-to-end encryption, client-side encrypted storage, password recovery, hardware-key login, session revocation across devices, audit logs, per-user authorization, public links, real-time collaboration, or cryptographic checksums inside server-local recovery points. Complete ZIP backups provide SHA-256 attachment integrity checks. Disk encryption, host security, TLS certificates, retention, and off-host backup protection remain infrastructure responsibilities.
 
 ## Reporting a vulnerability
 

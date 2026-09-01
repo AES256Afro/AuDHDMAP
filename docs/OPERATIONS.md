@@ -20,7 +20,7 @@ docker compose ps
 curl -fsS http://127.0.0.1:3010/api/health
 ```
 
-The health response intentionally contains only the version, storage state, revision, and bounded active-map, active-thought, and trash counts.
+The health response intentionally contains only the version, storage state, revision, bounded active-map, active-thought, trash, recovery-point, and recovery-problem counts.
 
 ## Reverse proxies and HTTPS
 
@@ -47,11 +47,31 @@ ZIP creation fails rather than producing a partial backup when a referenced atta
 
 Complete ZIP backups include trashed thoughts and their attachments. PDF, SVG, Markdown, plain text, and data-only JSON exports omit trash. Use the ZIP when the goal is recovery; use the other formats when the goal is sharing or interchange.
 
+## Server recovery points
+
+AuDHDMAP keeps up to 10 valid recovery points under `/data/snapshots`. A point contains a private workspace document, a versioned manifest, and every referenced attachment. On filesystems that support hard links, unchanged immutable attachment bytes share storage with the current workspace. AuDHDMAP falls back to a private copy when linking is unavailable.
+
+Recovery capture follows these rules:
+
+- The first persisted edit captures the preceding revision.
+- Later ordinary edits capture the preceding revision at most once every five minutes.
+- **Save current point** in the Export and recovery panel captures the current revision immediately. Repeating it without another saved change reuses the same point.
+- Permanent thought deletion, attachment deletion, complete-ZIP restore, and recovery-point restore require a current recovery point before changing data.
+- A required capture failure aborts the destructive operation without incrementing the workspace revision.
+
+The application validates a point's fixed directory layout, regular-file types, manifest identity, schema, stored revision, complete attachment inventory, metadata, and exact byte sizes before listing or restoring it. Unlike portable ZIP backups, local points do not carry independent SHA-256 checksums and are not intended as an off-host tamper-evident archive. Keep tested complete ZIP or volume backups on separate storage.
+
+Restoring a point is a two-step action. The server checks the current revision, captures the current state, stages the selected point's attachments, and then uses the same crash-recoverable directory swap as complete-ZIP restore. The restored document receives a new revision, so stale browser tabs cannot overwrite it.
+
+Recovery points are part of `/data` and therefore part of a volume-level backup. They are deliberately excluded from complete ZIP downloads to avoid recursively packaging retained history. A corrupt point is reported in the authenticated recovery panel and counted by `/api/health`, but it does not prevent the current healthy workspace from opening.
+
 ## Trash and permanent deletion
 
 Deleting a thought moves it to workspace trash and keeps its note, task fields, links, attachments, group, and original parent relationship. Restore returns that same record. If a trashed parent has active children, the children appear as temporary roots until the parent is restored.
 
 Permanent deletion requires a second explicit action in the Trash dialog. AuDHDMAP first verifies the current workspace revision, validates that the thought is already trashed, commits a workspace without the record and its links, and only then removes its stored attachment bytes. A stale browser receives a conflict instead of deleting current data.
+
+Before the commit, AuDHDMAP requires a valid recovery point for the current revision. Permanent deletion therefore means removal from the current workspace and current attachment directory. Existing server recovery points, complete ZIP downloads, volume snapshots, and other backups may still retain copies. Apply retention policy to those separate copies when removal from every retained backup is required.
 
 The in-tab undo and redo history is cleared after any permanent thought or attachment deletion. This prevents a later undo from restoring metadata that points to bytes already removed from storage.
 
@@ -70,7 +90,7 @@ Restore streams the upload to a private temporary file, expands into a private s
 
 ## Volume-level backup
 
-A stopped-container copy of the `audhdmap-data` volume captures `workspace.json` and the `attachments` directory together. Prefer a consistent volume snapshot or stop the container briefly before copying files. Do not copy `workspace.json` and attachments at unrelated times while writes are active.
+A stopped-container copy of the `audhdmap-data` volume captures `workspace.json`, the `attachments` directory, and server recovery points together. Prefer a consistent volume snapshot or stop the container briefly before copying files. Do not copy `workspace.json` and attachments at unrelated times while writes are active.
 
 The portable ZIP is the easier format for user-controlled restore and integrity checking. A volume backup remains useful for BoxPilot or infrastructure-level disaster recovery.
 
@@ -92,7 +112,7 @@ docker compose ps
 
 Avoid relying on the moving `edge` tag for a controlled installation. Use the catalog's versioned image.
 
-## Limits in 0.4.0
+## Limits in 0.5.0
 
 - 200 maps
 - 10,000 thoughts
@@ -105,8 +125,13 @@ Avoid relying on the moving `edge` tag for a controlled installation. Use the ca
 - 3 MiB JSON API payload
 - 512 MiB compressed backup upload
 - 2 GiB expanded backup and 20,010 ZIP entries
+- 10 valid server recovery points
+- 200 initially rendered records per structured view page
+- 100 initially rendered Trash records
 
 The large ZIP limits are hard safety ceilings, not capacity recommendations. Available disk space must cover the existing data, the uploaded ZIP, the staged restore, and the previous attachment directory during the final swap.
+
+Recovery-point storage depends on filesystem support. Hard-linked immutable attachments consume one set of data blocks until a point is pruned; copy fallback can require another full attachment set per point. Monitor the `/data` volume and keep enough free space for a forced point plus a staged restore.
 
 ## Troubleshooting
 
@@ -121,3 +146,7 @@ The large ZIP limits are hard safety ceilings, not capacity recommendations. Ava
 **A save reports another session changed the workspace:** reload the current server version before editing again. Revision checks intentionally prevent an older browser tab from silently overwriting newer data.
 
 **Permanent delete reports a stale workspace:** do not retry from the old tab. Reload, inspect the current trash record, and repeat the two-step action only if it is still intended.
+
+**A destructive action says a recovery point could not be created:** the requested deletion or restore did not run. Preserve `/data`, open Export and recovery to read the authenticated warning, and verify that every referenced attachment exists with the expected size and that the volume has free space.
+
+**Health reports `snapshotProblems` above zero:** the current workspace can still be healthy. Sign in, open Export and recovery, preserve the whole `/data` volume, and inspect the reported point before removing or repairing anything. Corrupt points are never silently used for restore.
