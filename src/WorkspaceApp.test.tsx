@@ -107,6 +107,20 @@ describe("workspace daily-use safeguards", () => {
     expect((api.saveWorkspace.mock.calls[0][0] as Workspace).nodes[0].title).toBe("Saved before export");
   });
 
+  it("asks oversized maps to focus a branch before creating a PDF", async () => {
+    const workspace = fixture();
+    const template = workspace.nodes[0];
+    workspace.nodes = Array.from({ length: 1_001 }, (_, index) => ({
+      ...structuredClone(template), id: `node-pdf-limit-${index}`, title: `Thought ${index}`,
+    }));
+    render(<WorkspaceApp initialWorkspace={workspace} username="owner" onSignedOut={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: /Export/ }));
+    const dialog = await screen.findByRole("dialog", { name: "Export and recovery" });
+    expect(within(dialog).queryByRole("link", { name: /PDF/ })).toBeNull();
+    expect(within(dialog).getByText("Focus a branch of 1,000 thoughts or fewer")).not.toBeNull();
+    expect(within(dialog).getByRole("link", { name: /Markdown/ })).not.toBeNull();
+  });
+
   it("flushes edits made while an earlier save is still running before export", async () => {
     let finishFirst: (() => void) | undefined;
     api.saveWorkspace

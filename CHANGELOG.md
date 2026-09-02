@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.9
+
+- Measure a synthetic 10,000-thought PDF at 716 pages and about 386 MB peak resident memory, despite completing in under half a second on the release host.
+- Require Branch Focus before PDF generation when the selected scope exceeds 1,000 active thoughts, preventing one request from exhausting a small container.
+- Keep complete Markdown, plain-text, project CSV, JSON, SVG, and ZIP paths available and explain the PDF-specific bound directly in the Export panel.
+- Add renderer, API, and interaction regressions for oversized-map rejection and focused-branch success.
+
 ## 0.6.8
 
 - Bound complete ZIP creation to 12 requests per 15 minutes per client before attachment inspection and archive compression.

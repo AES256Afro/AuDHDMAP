@@ -351,6 +351,24 @@ describe("AuDHDMAP API", () => {
     }
   });
 
+  it("rejects an oversized PDF with branch-focus guidance before rendering", async () => {
+    const { base, store } = await setup();
+    const { cookie } = await signIn(base);
+    const workspace = await store.read();
+    const template = workspace.nodes[0];
+    workspace.nodes = Array.from({ length: 1_001 }, (_, index) => ({
+      ...structuredClone(template), id: `node-pdf-limit-${index}`, parentId: index === 0 ? null : "node-pdf-limit-0", title: `Thought ${index}`,
+    }));
+    workspace.edges = [];
+    workspace.groups = [];
+    await store.replace(workspace, 0);
+    const response = await fetch(`${base}/api/export/map.pdf?mapId=map-home-server`, { headers: { cookie } });
+    expect(response.status).toBe(422);
+    expect(await response.json()).toEqual({
+      error: "This PDF would contain more than 1,000 thoughts. Focus a smaller branch or use Markdown, plain text, project CSV, JSON, or ZIP for the complete data.",
+    });
+  });
+
   it("exports and restores a complete ZIP backup", async () => {
     const { base, store } = await setup(); const { cookie } = await signIn(base);
     const backupResponse = await fetch(`${base}/api/export/backup.zip`, { headers: { cookie } });

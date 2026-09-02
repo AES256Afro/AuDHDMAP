@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { defaultWorkspace } from "./default-workspace.mjs";
-import { exportSelection, renderMapCsv, renderMapMarkdown, renderMapPdf, renderMapSvg, renderMapText, safeExportSlug } from "./exports.mjs";
+import { exportSelection, PDF_THOUGHT_LIMIT, renderMapCsv, renderMapMarkdown, renderMapPdf, renderMapSvg, renderMapText, safeExportSlug } from "./exports.mjs";
 
 describe("workspace exports", () => {
   it("exports a focused branch without leaking its siblings", () => {
@@ -69,6 +69,19 @@ describe("workspace exports", () => {
     expect(pdf.subarray(0, 5).toString("ascii")).toBe("%PDF-");
     expect(pdf.length).toBeGreaterThan(4_000);
     expect(pdf.toString("latin1").match(/\/Type \/Page\b/g)).toHaveLength(2);
+  });
+
+  it("requires branch focus before a PDF can exhaust a small container", async () => {
+    const workspace = defaultWorkspace(new Date("2026-09-01T12:00:00.000Z"));
+    const template = workspace.nodes[0];
+    workspace.nodes = Array.from({ length: PDF_THOUGHT_LIMIT + 1 }, (_, index) => ({
+      ...structuredClone(template), id: `node-pdf-limit-${index}`, parentId: index === 0 ? null : "node-pdf-limit-0", title: `Thought ${index}`,
+    }));
+    await expect(renderMapPdf(workspace, "map-home-server")).rejects.toMatchObject({
+      code: "PDF_EXPORT_TOO_LARGE",
+      message: expect.stringContaining("Focus a smaller branch"),
+    });
+    await expect(renderMapPdf(workspace, "map-home-server", "node-pdf-limit-1")).resolves.toBeInstanceOf(Buffer);
   });
 
   it("keeps exported filenames portable", () => {

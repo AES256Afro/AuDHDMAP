@@ -2,6 +2,7 @@ import PDFDocument from "pdfkit";
 
 const NODE_HEIGHT = 96;
 const MAP_PADDING = 36;
+export const PDF_THOUGHT_LIMIT = 1_000;
 
 function escapeXml(value) {
   return String(value).replace(/[&<>"']/g, (character) => ({
@@ -338,6 +339,11 @@ function drawPdfOutline(document, workspace, geometry) {
 
 export async function renderMapPdf(workspace, mapId, focusId = null) {
   const geometry = mapGeometry(workspace, mapId, focusId);
+  if (geometry.nodes.length > PDF_THOUGHT_LIMIT) {
+    const error = new Error(`This PDF would contain more than ${PDF_THOUGHT_LIMIT.toLocaleString("en-US")} thoughts. Focus a smaller branch or use Markdown, plain text, project CSV, JSON, or ZIP for the complete data.`);
+    error.code = "PDF_EXPORT_TOO_LARGE";
+    throw error;
+  }
   const document = new PDFDocument({ size: "A4", layout: "landscape", margin: 36, bufferPages: true, info: { Title: geometry.focus ? `${geometry.map.title}: ${geometry.focus.title}` : geometry.map.title, Author: "AuDHDMAP", Subject: "Visual map and outline export" } });
   const chunks = [];
   document.on("data", (chunk) => chunks.push(chunk));

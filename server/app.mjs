@@ -330,7 +330,10 @@ export function createApp({
         return response.send(renderMapCsv(workspace, mapId, focus?.id ?? null));
       }
       response.status(404).json({ error: "That export format is not available." });
-    } catch (error) { next(error); }
+    } catch (error) {
+      if (error.code === "PDF_EXPORT_TOO_LARGE") return response.status(422).json({ error: error.message });
+      next(error);
+    }
   });
 
   app.post("/api/import/preview", requireAuth, workspaceJson, async (request, response) => {

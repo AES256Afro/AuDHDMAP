@@ -23,6 +23,7 @@ interface Props {
 type SaveState = "saved" | "unsaved" | "saving" | "failed";
 type PendingImport = { fileName: string; workspace: unknown | null; result: ImportPreviewResult };
 const TRASH_PAGE_SIZE = 100;
+const PDF_THOUGHT_LIMIT = 1_000;
 const dialogFocusableSelector = [
   "a[href]", "button:not([disabled])", "input:not([disabled]):not([type=hidden])", "select:not([disabled])",
   "textarea:not([disabled])", "[tabindex]:not([tabindex='-1'])",
@@ -831,6 +832,9 @@ function ExportDialog({ workspace, mapId, focusId, restoring, onRestore, onResto
   const map = workspace.maps.find((entry) => entry.id === mapId)!;
   const focus = focusId ? workspace.nodes.find((node) => node.id === focusId && isActiveThought(node)) : null;
   const scope = focus ? `Focused branch: ${focus.title}` : `Current map: ${map.title}`;
+  const activeMapThoughts = workspace.nodes.filter((node) => node.mapId === mapId && isActiveThought(node));
+  const pdfThoughtCount = focus ? descendantThoughtIds(activeMapThoughts, mapId, focus.id).size : activeMapThoughts.length;
+  const pdfTooLarge = pdfThoughtCount > PDF_THOUGHT_LIMIT;
   const busy = restoring || Boolean(recoveryBusy);
 
   async function refreshRecoveryPoints() {
@@ -858,7 +862,7 @@ function ExportDialog({ workspace, mapId, focusId, restoring, onRestore, onResto
     <header><div><span className="eyebrow">Portable by design</span><h2 id="export-title">Export and recovery</h2></div><button autoFocus aria-label="Close export" disabled={busy} onClick={onClose}>×</button></header>
     <section className="export-section"><div className="export-heading"><div><h3>Share what you see</h3><p>{scope}. PDF includes a visual overview and readable outline.</p></div><span>{focus ? "BRANCH" : "MAP"}</span></div>
       <div className="export-grid">
-        <a href={mapExportUrl("pdf", mapId, focusId)} download><strong>PDF</strong><span>Visual map plus notes</span></a>
+        {pdfTooLarge ? <div className="disabled-export" role="status"><strong>PDF</strong><span>Focus a branch of 1,000 thoughts or fewer</span></div> : <a href={mapExportUrl("pdf", mapId, focusId)} download><strong>PDF</strong><span>Visual map plus notes</span></a>}
         <a href={mapExportUrl("svg", mapId, focusId)} download><strong>SVG</strong><span>Scalable visual map</span></a>
         <a href={mapExportUrl("md", mapId, focusId)} download><strong>Markdown</strong><span>Structured editable outline</span></a>
         <a href={mapExportUrl("txt", mapId, focusId)} download><strong>Plain text</strong><span>Portable indented outline</span></a>
