@@ -4,7 +4,7 @@ AuDHDMAP is a private, self-hosted mind-mapping and note-taking workspace. Captu
 
 ![AuDHDMAP Signal Garden canvas](public/site/canvas-map.jpg)
 
-## What works in 0.7.1
+## What works in 0.7.2
 
 - Free pan-and-zoom canvas with draggable nodes, branches, two-way labeled references, editable group boundaries, grid snapping, and explicit tree or grid auto-layout.
 - Strict Branch Focus that shows the selected branch, its ancestors, descendants, and explicit references while hiding unrelated clutter.
@@ -75,7 +75,7 @@ The development login is `owner` with password `boxpilot`. Development data is w
 ```sh
 npm run check
 npm audit
-docker build -t audhdmap:0.7.1 .
+docker build -t audhdmap:0.7.2 .
 ```
 
 The health endpoint is available without authentication at `/api/health`. It reports only application version, storage readiness, revision, bounded object counts, and recovery-point health counts. It never returns workspace content, filenames, point identifiers, or error details.
@@ -84,7 +84,7 @@ The health endpoint is available without authentication at `/api/health`. It rep
 
 The production image is designed for BoxPilot's generic application catalog:
 
-- image: `ghcr.io/aes256afro/audhdmap:0.7.1`
+- image: `ghcr.io/aes256afro/audhdmap:0.7.2`
 - container port: `3010`
 - persistent volume: `/data`
 - required generated secrets: `AUDHDMAP_ADMIN_PASSWORD` and `AUDHDMAP_SESSION_SECRET`

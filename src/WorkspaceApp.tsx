@@ -761,7 +761,7 @@ function TrashDialog({ nodes, maps, publicDemo, purgingId, onRestore, onPurge, o
   const visible = ordered.slice(0, visibleCount);
   useEffect(() => { if (confirmId && !nodes.some((node) => node.id === confirmId)) setConfirmId(null); }, [confirmId, nodes]);
   return <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && !purgingId && onClose()}><section ref={dialogRef} onKeyDown={onDialogKeyDown} className={`trash-dialog ${publicDemo ? "public-demo-trash" : ""}`} role="dialog" aria-modal="true" aria-labelledby="trash-title">
-    <header><div><span className="eyebrow">Recoverable by default</span><h2 id="trash-title">Trash</h2></div><button autoFocus aria-label="Close trash" disabled={Boolean(purgingId)} onClick={onClose}>×</button></header>
+    <header><div><span className="eyebrow">Deleted thoughts</span><h2 id="trash-title">Trash</h2></div><button autoFocus aria-label="Close trash" disabled={Boolean(purgingId)} onClick={onClose}>×</button></header>
     <p>{publicDemo ? "Trashed thoughts stay out of maps, search, projects, and exports. You can restore them while this shared sandbox is available." : "Trashed thoughts stay out of maps, search, projects, and ordinary exports. Complete ZIP backups still include them and their attachments."}</p>
     {ordered.length === 0 ? <div className="trash-empty"><span>♲</span><strong>Trash is empty</strong><small>Deleting a thought moves it here first.</small></div> : <><div className="trash-list">{visible.map((node) => <article key={node.id}>
       <div><strong>{node.title}</strong><small>{mapById.get(node.mapId)?.title ?? "Unknown map"} · {node.attachments.length} attachment{node.attachments.length === 1 ? "" : "s"}</small></div>
@@ -863,13 +863,13 @@ function ExportDialog({ workspace, mapId, focusId, publicDemo, restoring, onRest
   }
 
   return <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && !busy && onClose()}><section ref={dialogRef} onKeyDown={onDialogKeyDown} className="export-dialog" role="dialog" aria-modal="true" aria-labelledby="export-title">
-    <header><div><span className="eyebrow">Portable by design</span><h2 id="export-title">Export and recovery</h2></div><button autoFocus aria-label="Close export" disabled={busy} onClick={onClose}>×</button></header>
-    <section className="export-section"><div className="export-heading"><div><h3>Share what you see</h3><p>{scope}. PDF includes a visual overview and readable outline.</p></div><span>{focus ? "BRANCH" : "MAP"}</span></div>
+    <header><div><span className="eyebrow">File export and recovery</span><h2 id="export-title">Export and recovery</h2></div><button autoFocus aria-label="Close export" disabled={busy} onClick={onClose}>×</button></header>
+    <section className="export-section"><div className="export-heading"><div><h3>Map exports</h3><p>{scope}. PDF includes a visual overview and readable outline.</p></div><span>{focus ? "BRANCH" : "MAP"}</span></div>
       <div className="export-grid">
-        {pdfTooLarge ? <div className="disabled-export" role="status"><strong>PDF</strong><span>Focus a branch of 1,000 thoughts or fewer</span></div> : <a href={mapExportUrl("pdf", mapId, focusId)} download><strong>PDF</strong><span>Visual map plus notes</span></a>}
-        <a href={mapExportUrl("svg", mapId, focusId)} download><strong>SVG</strong><span>Scalable visual map</span></a>
-        <a href={mapExportUrl("md", mapId, focusId)} download><strong>Markdown</strong><span>Structured editable outline</span></a>
-        <a href={mapExportUrl("txt", mapId, focusId)} download><strong>Plain text</strong><span>Portable indented outline</span></a>
+        {pdfTooLarge ? <div className="disabled-export" role="status"><strong>PDF</strong><span>Focus a branch of 1,000 thoughts or fewer</span></div> : <a href={mapExportUrl("pdf", mapId, focusId)} download><strong>PDF</strong><span>Map and outline</span></a>}
+        <a href={mapExportUrl("svg", mapId, focusId)} download><strong>SVG</strong><span>Scalable map image</span></a>
+        <a href={mapExportUrl("md", mapId, focusId)} download><strong>Markdown</strong><span>Editable outline</span></a>
+        <a href={mapExportUrl("txt", mapId, focusId)} download><strong>Plain text</strong><span>Indented outline</span></a>
         <a href={mapExportUrl("csv", mapId, focusId)} download><strong>Project CSV</strong><span>Hierarchy, tasks, and references</span></a>
       </div>
     </section>

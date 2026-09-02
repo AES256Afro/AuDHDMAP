@@ -2,7 +2,7 @@
 
 ## Intended boundary
 
-AuDHDMAP 0.7.1 is a private, single-owner application by default. It is suitable for a trusted individual or household behind BoxPilot, a private network, a VPN, or a carefully configured HTTPS reverse proxy. It is not a multi-tenant collaboration service and does not implement per-map roles or user isolation.
+AuDHDMAP 0.7.2 is a private, single-owner application by default. It is suitable for a trusted individual or household behind BoxPilot, a private network, a VPN, or a carefully configured HTTPS reverse proxy. It is not a multi-tenant collaboration service and does not implement per-map roles or user isolation.
 
 The separate `AUDHDMAP_PUBLIC_DEMO=1` deployment mode is only for a disposable shared product sandbox. It intentionally permits anonymous workspace reads, edits, and map-level exports. It disables operations that can upload, restore, retain, or permanently erase shared data. This mode must never hold private or durable notes.
 

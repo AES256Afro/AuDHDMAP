@@ -34,7 +34,7 @@ export function LandingPage() {
     <main id="top">
       <section className="site-hero">
         <div className="site-hero-copy">
-          <div className="site-kicker"><i /> VERSION 0.7.1 <span>PUBLIC DEMO</span></div>
+          <div className="site-kicker"><i /> VERSION 0.7.2 <span>PUBLIC DEMO</span></div>
           <h1>Self-hosted mind mapping <em>and notes.</em></h1>
           <p>AuDHDMAP runs in one Docker container. It provides Canvas, Outline, Board, Timeline, and Gantt views over the same workspace data.</p>
           <div className="site-actions"><a className="site-button" href="/demo">Open demo <span aria-hidden="true">↗</span></a><a className="site-text-link" href="https://github.com/AES256Afro/AuDHDMAP">Source code <span aria-hidden="true">↗</span></a></div>
@@ -59,7 +59,7 @@ export function LandingPage() {
       </section>
 
       <section className="site-section site-screens" id="screens">
-        <header className="site-section-heading"><div><span className="site-label">INTERFACE</span><h2>Canvas, outline, and export</h2></div><p>These screenshots were captured from version 0.7.1.</p></header>
+        <header className="site-section-heading"><div><span className="site-label">INTERFACE</span><h2>Canvas, outline, and export</h2></div><p>These screenshots were captured from version 0.7.2.</p></header>
         <div className="screen-story">
           <article className="screen-story-copy"><span>01 / CANVAS</span><h3>Canvas view</h3><p>Place, move, connect, and group thoughts on a pan-and-zoom canvas.</p><ul><li>Pan and zoom</li><li>Tree and grid layouts</li><li>Cross-map references</li><li>Branch focus</li></ul></article>
           <div className="screen-frame large"><div className="screen-bar"><span>SPATIAL WORKSPACE</span><i /><i /><i /></div><img src="/site/canvas-map.jpg" alt="Freeform AuDHDMAP canvas with linked thoughts and a details inspector" /></div>
@@ -87,7 +87,7 @@ export function LandingPage() {
       <section className="site-final-cta"><span className="site-label">PUBLIC DEMO</span><h2>Shared test workspace</h2><p>No password is required. Data is shared with other visitors and can be reset. Do not enter private information.</p><a className="site-button" href="/demo">Open demo <span aria-hidden="true">↗</span></a></section>
     </main>
 
-    <footer className="site-footer"><a className="site-brand" href="#top"><span>⌘</span><strong>AuDHDMAP</strong></a><p>Version 0.7.1</p><nav><a href="https://github.com/AES256Afro/AuDHDMAP">Source</a><a href="https://github.com/AES256Afro/AuDHDMAP/blob/main/docs/SECURITY.md">Security</a><a href="/demo">Demo</a></nav></footer>
+    <footer className="site-footer"><a className="site-brand" href="#top"><span>⌘</span><strong>AuDHDMAP</strong></a><p>Version 0.7.2</p><nav><a href="https://github.com/AES256Afro/AuDHDMAP">Source</a><a href="https://github.com/AES256Afro/AuDHDMAP/blob/main/docs/SECURITY.md">Security</a><a href="/demo">Demo</a></nav></footer>
     <div className="site-scanlines" aria-hidden="true" />
   </div>;
 }

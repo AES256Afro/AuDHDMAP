@@ -1,6 +1,6 @@
 {
   "name": "audhdmap",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "private": true,
   "type": "module",
   "description": "Private, self-hosted visual thinking and note-taking workspace.",

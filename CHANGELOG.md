@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.2
+
+- Replace slogan-style labels in the export and trash dialogs with direct technical labels.
+
 ## 0.7.1
 
 - Replace promotional website copy with concise technical descriptions of the application, runtime, storage, views, exports, deployment requirements, and public-demo limits.
