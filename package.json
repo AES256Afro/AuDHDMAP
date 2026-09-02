@@ -1,6 +1,6 @@
 {
   "name": "audhdmap",
-  "version": "0.6.6",
+  "version": "0.6.7",
   "private": true,
   "type": "module",
   "description": "Private, self-hosted visual thinking and note-taking workspace.",
@@ -21,6 +21,7 @@
     "archiver": "8.0.0",
     "dompurify": "3.4.14",
     "express": "5.2.1",
+    "express-rate-limit": "8.7.0",
     "marked": "18.0.11",
     "pdfkit": "0.20.2",
     "react": "19.2.8",

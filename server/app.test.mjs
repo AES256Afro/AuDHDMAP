@@ -13,12 +13,12 @@ afterEach(async () => {
   }));
 });
 
-async function setup({ trustProxy = false, maxBackupBytes, readinessError = null } = {}) {
+async function setup({ trustProxy = false, maxBackupBytes, readinessError = null, requestLimits } = {}) {
   const directory = await mkdtemp(path.join(os.tmpdir(), "audhdmap-api-"));
   const store = createWorkspaceStore({ dataDirectory: directory, now: () => new Date("2026-09-01T12:00:00.000Z") });
   await store.initialize();
   if (readinessError) store.readiness = async () => { throw readinessError; };
-  const app = createApp({ store, adminUsername: "owner", adminPassword: "correct horse", sessionSecret: "test-session-secret-is-long-enough", trustProxy, maxBackupBytes, now: () => Date.parse("2026-09-01T12:00:00.000Z"), distDirectory: path.join(directory, "missing-dist") });
+  const app = createApp({ store, adminUsername: "owner", adminPassword: "correct horse", sessionSecret: "test-session-secret-is-long-enough", trustProxy, maxBackupBytes, requestLimits, now: () => Date.parse("2026-09-01T12:00:00.000Z"), distDirectory: path.join(directory, "missing-dist") });
   const server = await new Promise((resolve) => { const listening = app.listen(0, "127.0.0.1", () => resolve(listening)); });
   resources.push({ server, directory });
   const address = server.address();
@@ -76,6 +76,32 @@ describe("AuDHDMAP API", () => {
     const { response } = await signIn(base, "wrong");
     expect(response.status).toBe(401);
     expect(await response.json()).toEqual({ error: "The username or password is not correct." });
+  });
+
+  it("rate-limits filesystem-heavy routes before repeating their work", async () => {
+    const { base } = await setup({ requestLimits: { backupImports: 1, attachmentWrites: 1, attachmentReads: 1 } });
+    const { cookie } = await signIn(base);
+    const applicationHeaders = { cookie, "x-audhdmap-request": "1" };
+    const uploaded = await fetch(`${base}/api/attachments`, { method: "POST", headers: { ...applicationHeaders, "content-type": "application/octet-stream", "x-file-name": "limited.txt", "x-file-type": "text/plain" }, body: "limited" });
+    expect(uploaded.status).toBe(201);
+    const attachment = await uploaded.json();
+    const repeatedUpload = await fetch(`${base}/api/attachments`, { method: "POST", headers: { ...applicationHeaders, "content-type": "application/octet-stream", "x-file-name": "blocked.txt", "x-file-type": "text/plain" }, body: "blocked" });
+    expect(repeatedUpload.status).toBe(429);
+    expect(await repeatedUpload.json()).toEqual({ error: "Too many attachment uploads. Wait before trying again." });
+
+    const workspace = await (await fetch(`${base}/api/workspace`, { headers: { cookie } })).json();
+    workspace.nodes[0].attachments.push(attachment);
+    expect((await fetch(`${base}/api/workspace`, { method: "PUT", headers: { ...applicationHeaders, "content-type": "application/json" }, body: JSON.stringify({ workspace, expectedRevision: 0 }) })).status).toBe(200);
+    expect((await fetch(`${base}/api/attachments/${attachment.id}`, { headers: { cookie } })).status).toBe(200);
+    const repeatedDownload = await fetch(`${base}/api/attachments/${attachment.id}`, { headers: { cookie } });
+    expect(repeatedDownload.status).toBe(429);
+    expect(await repeatedDownload.json()).toEqual({ error: "Too many attachment downloads. Wait before trying again." });
+
+    const restoreHeaders = { ...applicationHeaders, "content-type": "application/zip", "x-audhdmap-revision": "1" };
+    expect((await fetch(`${base}/api/import/backup`, { method: "POST", headers: restoreHeaders, body: "not a zip" })).status).toBe(400);
+    const repeatedRestore = await fetch(`${base}/api/import/backup`, { method: "POST", headers: restoreHeaders, body: "still not a zip" });
+    expect(repeatedRestore.status).toBe(429);
+    expect(await repeatedRestore.json()).toEqual({ error: "Too many backup restores. Wait before trying again." });
   });
 
   it("authenticates before parsing large-route JSON and keeps login bodies small", async () => {

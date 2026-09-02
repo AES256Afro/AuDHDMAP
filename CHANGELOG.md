@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.7
+
+- Add recognized, bounded per-IP request limits to backup restore, attachment upload and download, and uncached application-page fallback routes.
+- Narrow uploaded attachment bodies to verified buffers before signature checks, persistence, and response metadata.
+- Keep plaintext environment-credential comparison constant-time without presenting fast SHA-256 as a stored password hash.
+- Add repeatable Cloudflare Container deployment for the authentication-gated `audhdmap.com` demo, including the real server-side PDF renderer.
+- Enable GitHub Dependabot vulnerability alerts, automatic security updates, secret push protection, and CodeQL default setup as release gates.
+
 ## 0.6.6
 
 - Mark authenticated attachment downloads `private, no-store`, preventing browser or intermediary cache retention of private inline images and downloaded file bytes.

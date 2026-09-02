@@ -6,6 +6,7 @@ import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import express from "express";
+import { rateLimit } from "express-rate-limit";
 import { prepareBackup, restoreBackupArchive, writeBackupArchive } from "./backup.mjs";
 import { renderMapCsv, renderMapMarkdown, renderMapPdf, renderMapSvg, renderMapText, safeExportSlug } from "./exports.mjs";
 
@@ -23,9 +24,14 @@ function parseCookies(header = "") {
 }
 
 function safeEqual(left, right) {
-  const a = crypto.createHash("sha256").update(String(left)).digest();
-  const b = crypto.createHash("sha256").update(String(right)).digest();
-  return crypto.timingSafeEqual(a, b);
+  const leftBytes = Buffer.from(String(left));
+  const rightBytes = Buffer.from(String(right));
+  const comparisonLength = Math.max(leftBytes.length, rightBytes.length, 1);
+  const paddedLeft = Buffer.alloc(comparisonLength);
+  const paddedRight = Buffer.alloc(comparisonLength);
+  leftBytes.copy(paddedLeft);
+  rightBytes.copy(paddedRight);
+  return crypto.timingSafeEqual(paddedLeft, paddedRight) && leftBytes.length === rightBytes.length;
 }
 
 function createSessions(secret, { now = () => Date.now(), lifetimeMs = 12 * 60 * 60 * 1000 } = {}) {
@@ -66,8 +72,9 @@ function safeAttachmentId(value) {
 const safeRecordId = safeAttachmentId;
 
 function verifiedImageMime(buffer, claimedMime) {
+  if (!Buffer.isBuffer(buffer) || typeof claimedMime !== "string") return "application/octet-stream";
   const png = buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
-  const jpeg = buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
+  const jpeg = buffer.length >= 3 && buffer.readUInt8(0) === 0xff && buffer.readUInt8(1) === 0xd8 && buffer.readUInt8(2) === 0xff;
   const gif = buffer.length >= 6 && ["GIF87a", "GIF89a"].includes(buffer.subarray(0, 6).toString("ascii"));
   const webp = buffer.length >= 12 && buffer.subarray(0, 4).toString("ascii") === "RIFF" && buffer.subarray(8, 12).toString("ascii") === "WEBP";
   const avif = buffer.length >= 12 && buffer.subarray(4, 8).toString("ascii") === "ftyp" && ["avif", "avis"].includes(buffer.subarray(8, 12).toString("ascii"));
@@ -113,6 +120,7 @@ export function createApp({
   maxBackupBytes = 512 * 1024 * 1024,
   trustProxy = false,
   version = "development",
+  requestLimits = {},
 } = {}) {
   if (!store) throw new Error("store is required");
   if (!adminPassword || String(adminPassword).length < 8) throw new Error("AUDHDMAP_ADMIN_PASSWORD must contain at least 8 characters");
@@ -123,6 +131,18 @@ export function createApp({
   const failures = new Map();
   const smallJson = express.json({ limit: "64kb" });
   const workspaceJson = express.json({ limit: "8mb" });
+  const boundedLimit = (value, fallback) => Number.isInteger(value) && value > 0 ? value : fallback;
+  const heavyRouteLimit = (limit, windowMs, message) => rateLimit({
+    windowMs,
+    limit,
+    standardHeaders: "draft-8",
+    legacyHeaders: false,
+    handler: (_request, response) => response.status(429).json({ error: message }),
+  });
+  const backupImportLimit = heavyRouteLimit(boundedLimit(requestLimits.backupImports, 6), 15 * 60_000, "Too many backup restores. Wait before trying again.");
+  const attachmentWriteLimit = heavyRouteLimit(boundedLimit(requestLimits.attachmentWrites, 30), 60_000, "Too many attachment uploads. Wait before trying again.");
+  const attachmentReadLimit = heavyRouteLimit(boundedLimit(requestLimits.attachmentReads, 240), 60_000, "Too many attachment downloads. Wait before trying again.");
+  const applicationPageLimit = heavyRouteLimit(boundedLimit(requestLimits.applicationPages, 300), 60_000, "Too many page requests. Wait before trying again.");
   app.disable("x-powered-by");
   app.set("trust proxy", trustProxy);
 
@@ -334,7 +354,7 @@ export function createApp({
     }
   });
 
-  app.post("/api/import/backup", requireAuth, async (request, response) => {
+  app.post("/api/import/backup", requireAuth, backupImportLimit, async (request, response) => {
     const temporary = path.join(store.dataDirectory, `.backup-upload-${crypto.randomUUID()}.zip`);
     try {
       if (!request.is("application/zip") && !request.is("application/octet-stream")) return response.status(415).json({ error: "Choose an AuDHDMAP ZIP backup." });
@@ -351,17 +371,18 @@ export function createApp({
     } finally { await unlink(temporary).catch(() => {}); }
   });
 
-  app.post("/api/attachments", requireAuth, express.raw({ type: "application/octet-stream", limit: maxAttachmentBytes }), async (request, response) => {
-    if (!Buffer.isBuffer(request.body) || request.body.length === 0) return response.status(400).json({ error: "Choose a non-empty file." });
+  app.post("/api/attachments", requireAuth, attachmentWriteLimit, express.raw({ type: "application/octet-stream", limit: maxAttachmentBytes }), async (request, response) => {
+    const attachmentBytes = request.body;
+    if (!Buffer.isBuffer(attachmentBytes) || attachmentBytes.length === 0) return response.status(400).json({ error: "Choose a non-empty file." });
     const id = `attachment-${crypto.randomUUID()}`;
     const name = decodedHeader(request.get("x-file-name"), "attachment").slice(0, 240);
     const claimedMime = String(request.get("x-file-type") || "application/octet-stream").slice(0, 120);
-    const mime = claimedMime.startsWith("image/") ? verifiedImageMime(request.body, claimedMime) : claimedMime;
-    await writeFile(path.join(store.attachmentDirectory, id), request.body, { mode: 0o600, flag: "wx" });
-    response.status(201).json({ id, name, mime, size: request.body.length, createdAt: new Date(now()).toISOString() });
+    const mime = claimedMime.startsWith("image/") ? verifiedImageMime(attachmentBytes, claimedMime) : claimedMime;
+    await writeFile(path.join(store.attachmentDirectory, id), attachmentBytes, { mode: 0o600, flag: "wx" });
+    response.status(201).json({ id, name, mime, size: attachmentBytes.length, createdAt: new Date(now()).toISOString() });
   });
 
-  app.get("/api/attachments/:id", requireAuth, async (request, response) => {
+  app.get("/api/attachments/:id", requireAuth, attachmentReadLimit, async (request, response) => {
     const workspace = await store.read();
     let attachment;
     for (const node of workspace.nodes) {
@@ -416,7 +437,7 @@ export function createApp({
   });
 
   app.use(express.static(distDirectory, { index: false, maxAge: "1h", immutable: false }));
-  app.get("/{*path}", async (request, response, next) => {
+  app.get("/{*path}", applicationPageLimit, async (request, response, next) => {
     if (request.path.startsWith("/api/")) return next();
     try { response.sendFile(path.join(distDirectory, "index.html")); }
     catch (error) { next(error); }
