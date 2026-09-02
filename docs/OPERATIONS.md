@@ -142,7 +142,7 @@ On the first deployment, store `AUDHDMAP_DEMO_PASSWORD` and a random `AUDHDMAP_S
 
 The demo's container-local `/data` is not a production backup target. A replacement or rollout can return it to the seed workspace. Keep real work in a durable BoxPilot or Docker deployment.
 
-## Limits in 0.6.9
+## Limits in 0.6.10
 
 - 200 maps
 - 10,000 thoughts

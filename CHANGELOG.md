@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.10
+
+- Upgrade the production Alpine OpenSSL libraries to the current patched release during the container build.
+- Remove the unused npm CLI and its transitive package tree from the runtime image, reducing both image size and attack surface.
+- Add an exact-image critical and high severity container scan to the release verification record.
+
 ## 0.6.9
 
 - Measure a synthetic 10,000-thought PDF at 716 pages and about 386 MB peak resident memory, despite completing in under half a second on the release host.

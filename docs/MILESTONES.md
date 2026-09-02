@@ -69,7 +69,7 @@ Acceptance criteria:
 - Import confirmation is bound to the exact previewed payload and current revision. The server validates both again and requires a recovery point before replacement.
 - Checked-in JSON and CSV fixtures, API tests, UI tests, and the supported-limit benchmark cover compatibility and the full preview-confirm path.
 
-## 0.6.1 through 0.6.9 - Hardened daily interaction
+## 0.6.1 through 0.6.10 - Hardened daily interaction
 
 Status: shipped
 
@@ -81,6 +81,7 @@ Status: shipped
 - Every authenticated workspace, export, recovery, and attachment response prevents shared or browser cache retention.
 - Filesystem-heavy restore, attachment, export, and application fallback routes enforce bounded per-IP request rates before doing their expensive work.
 - PDF generation requires a focused scope at or below 1,000 active thoughts so page-total buffering remains viable in a small container; complete non-PDF exports remain available at the workspace limit.
+- The production container upgrades patched OpenSSL libraries and excludes the unused npm CLI, with critical and high severity scanning against the exact release image.
 - API and interaction regression tests cover parser order, both body ceilings, malformed JSON and cookies, bounded health failures, Unicode filenames, fail-closed startup, focus containment, and focus restoration.
 
 ## Later gates

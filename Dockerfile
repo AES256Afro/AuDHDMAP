@@ -21,7 +21,11 @@ COPY --from=production-dependencies --chown=node:node /app/node_modules ./node_m
 COPY --from=build --chown=node:node /app/dist ./dist
 COPY --chown=node:node package.json ./package.json
 COPY --chown=node:node server ./server
-RUN mkdir -p /data && chown node:node /data
+RUN apk upgrade --no-cache libcrypto3 libssl3 \
+    && rm -rf /usr/local/lib/node_modules/npm \
+    && rm -f /usr/local/bin/npm /usr/local/bin/npx \
+    && mkdir -p /data \
+    && chown node:node /data
 USER node
 EXPOSE 3010
 VOLUME ["/data"]
