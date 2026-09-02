@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.0
+
+- Replace the hosted shared workspace with a separate `sessionStorage` workspace for each browser tab. Reloads keep that tab's edits; closing the tab removes them.
+- Block public-demo workspace, JSON, backup, recovery, attachment, and permanent-delete storage routes. Normal BoxPilot and Docker persistence remains unchanged.
+- Generate public-demo PDF, SVG, Markdown, text, and project CSV files from bounded no-store requests without writing the supplied workspace to server storage.
+- Remove the Cloudflare demo's owner password and session-secret requirements, and start it without a workspace data store.
+- Add a two-step Reset demo action, direct browser-storage labels, tab-isolation tests, stateless export tests, and updated public documentation.
+
 ## 0.7.2
 
 - Replace slogan-style labels in the export and trash dialogs with direct technical labels.

@@ -7,6 +7,7 @@ import type { Workspace } from "./model";
 const api = vi.hoisted(() => ({
   createRecoveryPoint: vi.fn(),
   deleteAttachment: vi.fn(),
+  exportDemoMap: vi.fn(),
   importWorkspace: vi.fn(),
   listRecoveryPoints: vi.fn(),
   logout: vi.fn(),
@@ -45,11 +46,15 @@ function fixture(): Workspace {
 }
 
 describe("workspace daily-use safeguards", () => {
-  afterEach(cleanup);
+  afterEach(() => { cleanup(); vi.restoreAllMocks(); });
   beforeEach(() => {
     vi.clearAllMocks();
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: vi.fn(() => "blob:audhdmap-test") });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
     api.saveWorkspace.mockImplementation(async (workspace: Workspace, revision: number) => ({ ...structuredClone(workspace), revision: revision + 1 }));
     api.deleteAttachment.mockImplementation(async (_id: string, workspace: Workspace, revision: number) => ({ ...structuredClone(workspace), revision: revision + 1 }));
+    api.exportDemoMap.mockResolvedValue({ blob: new Blob(["%PDF"], { type: "application/pdf" }), filename: "first-map.pdf" });
     api.purgeTrashedThought.mockImplementation(async (_id: string, workspace: Workspace, revision: number) => ({ ...structuredClone(workspace), revision: revision + 1 }));
     api.listRecoveryPoints.mockResolvedValue({ snapshots: [], problems: [], warning: null });
     api.createRecoveryPoint.mockResolvedValue({ snapshot: { id: "snapshot-r0-11111111-1111-4111-8111-111111111111", revision: 0, createdAt: "2026-09-01T12:00:00.000Z", thoughts: 1, trashed: 0, attachments: 0 } });
@@ -107,10 +112,14 @@ describe("workspace daily-use safeguards", () => {
     expect((api.saveWorkspace.mock.calls[0][0] as Workspace).nodes[0].title).toBe("Saved before export");
   });
 
-  it("presents a constrained shared sandbox without private recovery controls", async () => {
-    const rendered = render(<WorkspaceApp initialWorkspace={fixture()} username="demo" publicDemo onSignedOut={() => {}} />);
-    expect(screen.getByText("Public sandbox")).not.toBeNull();
-    expect(screen.getByText("PUBLIC DEMO")).not.toBeNull();
+  it("presents a tab-local browser demo without private recovery controls", async () => {
+    const reset = vi.fn();
+    const saveInTab = vi.fn(async (workspace: Workspace, revision: number) => ({ ...structuredClone(workspace), revision: revision + 1 }));
+    const rendered = render(<WorkspaceApp initialWorkspace={fixture()} username="demo" publicDemo saveWorkspaceData={saveInTab} onResetDemo={reset} onSignedOut={() => {}} />);
+    expect(screen.getByText("Browser demo")).not.toBeNull();
+    expect(screen.getByText("This tab only")).not.toBeNull();
+    expect(screen.getByText("BROWSER DEMO")).not.toBeNull();
+    expect(screen.getByText("✓ Saved in tab")).not.toBeNull();
     expect(screen.getByRole("link", { name: /Back to website/ }).getAttribute("href")).toBe("/");
     expect(screen.queryByRole("button", { name: /Sign out/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /Import JSON/ })).toBeNull();
@@ -118,12 +127,39 @@ describe("workspace daily-use safeguards", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Export/ }));
     const dialog = await screen.findByRole("dialog", { name: "Export and recovery" });
-    expect(within(dialog).getByRole("link", { name: /PDF/ })).not.toBeNull();
-    expect(within(dialog).getByText("Shared sandbox limits")).not.toBeNull();
+    expect(within(dialog).getByRole("button", { name: /PDF/ })).not.toBeNull();
+    expect(within(dialog).getByText("Browser demo storage")).not.toBeNull();
+    expect(within(dialog).getByText(/disappear when the tab is closed/i)).not.toBeNull();
     expect(within(dialog).queryByText("Back up everything")).toBeNull();
     expect(within(dialog).queryByText("Server recovery points")).toBeNull();
     expect(within(dialog).queryByText("Restore a complete backup")).toBeNull();
     expect(api.listRecoveryPoints).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: /PDF/ }));
+    await waitFor(() => expect(api.exportDemoMap).toHaveBeenCalledWith(expect.objectContaining({ maps: expect.any(Array) }), "pdf", "map-one", null));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close export" }));
+    fireEvent.click(screen.getByRole("button", { name: /Reset demo/ }));
+    expect(screen.getByRole("button", { name: /Confirm reset/ })).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Confirm reset/ }));
+    expect(reset).toHaveBeenCalledTimes(1);
+    expect(api.saveWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("opens browser-demo export from the current map even when tab storage has failed", async () => {
+    const failingTabSave = vi.fn(async () => { throw new Error("Browser storage is full."); });
+    render(<WorkspaceApp initialWorkspace={fixture()} username="demo" publicDemo saveWorkspaceData={failingTabSave} onSignedOut={() => {}} />);
+    fireEvent.change(screen.getByDisplayValue("Root thought"), { target: { value: "Current unsaved map" } });
+    fireEvent.click(screen.getByRole("button", { name: /Export/ }));
+    expect(await screen.findByRole("dialog", { name: "Export and recovery" })).not.toBeNull();
+  });
+
+  it("lets keyboard activation operate a button instead of triggering a map shortcut", async () => {
+    render(<WorkspaceApp initialWorkspace={fixture()} username="demo" publicDemo onSignedOut={() => {}} />);
+    const exportButton = screen.getByRole("button", { name: /Export/ });
+    exportButton.focus();
+    fireEvent.keyDown(exportButton, { key: "Enter" });
+    fireEvent.click(exportButton);
+    expect(await screen.findByRole("dialog", { name: "Export and recovery" })).not.toBeNull();
+    expect(screen.queryByDisplayValue("New thought")).toBeNull();
   });
 
   it("asks oversized maps to focus a branch before creating a PDF", async () => {

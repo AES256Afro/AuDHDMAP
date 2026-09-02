@@ -9,6 +9,7 @@ import express from "express";
 import { rateLimit } from "express-rate-limit";
 import { prepareBackup, restoreBackupArchive, writeBackupArchive } from "./backup.mjs";
 import { renderMapCsv, renderMapMarkdown, renderMapPdf, renderMapSvg, renderMapText, safeExportSlug } from "./exports.mjs";
+import { normalizeWorkspace } from "./workspace.mjs";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const defaultDist = path.join(packageRoot, "dist");
@@ -92,6 +93,49 @@ function ordinaryExportWorkspace(workspace) {
   };
 }
 
+async function sendMapExport(response, workspace, format, mapId, focusId) {
+  const map = workspace.maps.find((entry) => entry.id === mapId);
+  if (!map) {
+    response.status(400).json({ error: "Choose a map before exporting." });
+    return;
+  }
+  const focus = focusId ? workspace.nodes.find((node) => node.id === focusId && node.mapId === mapId && !node.trashedAt) : null;
+  const slug = safeExportSlug(focus ? `${map.title}-${focus.title}` : map.title);
+  response.setHeader("Cache-Control", "private, no-store");
+  if (format === "pdf") {
+    const document = await renderMapPdf(workspace, mapId, focus?.id ?? null);
+    response.setHeader("Content-Type", "application/pdf");
+    response.setHeader("Content-Disposition", contentDisposition(`${slug}.pdf`));
+    response.send(document);
+    return;
+  }
+  if (format === "svg") {
+    response.setHeader("Content-Type", "image/svg+xml; charset=utf-8");
+    response.setHeader("Content-Disposition", contentDisposition(`${slug}.svg`));
+    response.send(renderMapSvg(workspace, mapId, focus?.id ?? null));
+    return;
+  }
+  if (format === "md") {
+    response.setHeader("Content-Type", "text/markdown; charset=utf-8");
+    response.setHeader("Content-Disposition", contentDisposition(`${slug}.md`));
+    response.send(renderMapMarkdown(workspace, mapId, focus?.id ?? null));
+    return;
+  }
+  if (format === "txt") {
+    response.setHeader("Content-Type", "text/plain; charset=utf-8");
+    response.setHeader("Content-Disposition", contentDisposition(`${slug}.txt`));
+    response.send(renderMapText(workspace, mapId, focus?.id ?? null));
+    return;
+  }
+  if (format === "csv") {
+    response.setHeader("Content-Type", "text/csv; charset=utf-8");
+    response.setHeader("Content-Disposition", contentDisposition(`${slug}-project-handoff.csv`));
+    response.send(renderMapCsv(workspace, mapId, focus?.id ?? null));
+    return;
+  }
+  response.status(404).json({ error: "That export format is not available." });
+}
+
 async function receiveRequestFile(request, targetPath, maximumBytes) {
   let size = 0;
   const limiter = new Transform({
@@ -125,10 +169,10 @@ export function createApp({
 } = {}) {
   if (!store) throw new Error("store is required");
   if (!publicDemo && (!adminPassword || String(adminPassword).length < 8)) throw new Error("AUDHDMAP_ADMIN_PASSWORD must contain at least 8 characters");
-  if (!sessionSecret || sessionSecret.length < 32) throw new Error("AUDHDMAP_SESSION_SECRET must contain at least 32 characters");
+  if (!publicDemo && (!sessionSecret || sessionSecret.length < 32)) throw new Error("AUDHDMAP_SESSION_SECRET must contain at least 32 characters");
 
   const app = express();
-  const sessions = createSessions(sessionSecret, { now });
+  const sessions = publicDemo ? null : createSessions(sessionSecret, { now });
   const failures = new Map();
   const smallJson = express.json({ limit: "64kb" });
   const workspaceJson = express.json({ limit: "8mb" });
@@ -177,7 +221,7 @@ export function createApp({
     next();
   }
   function privateInstallOnly(_request, response, next) {
-    if (publicDemo) return response.status(403).json({ error: "This operation is disabled in the shared public demo." });
+    if (publicDemo) return response.status(403).json({ error: "This operation is disabled in the browser demo." });
     next();
   }
 
@@ -235,12 +279,12 @@ export function createApp({
     response.json({ authenticated: false });
   });
 
-  app.get("/api/workspace", requireAuth, async (_request, response) => {
+  app.get("/api/workspace", requireAuth, privateInstallOnly, async (_request, response) => {
     response.setHeader("Cache-Control", "no-store");
     response.json(await store.read());
   });
 
-  app.put("/api/workspace", requireAuth, workspaceJson, async (request, response) => {
+  app.put("/api/workspace", requireAuth, privateInstallOnly, workspaceJson, async (request, response) => {
     const expectedRevision = Number(request.body?.expectedRevision);
     try {
       const next = await store.replace(request.body?.workspace, expectedRevision);
@@ -281,7 +325,7 @@ export function createApp({
     }
   });
 
-  app.get("/api/export", requireAuth, async (_request, response) => {
+  app.get("/api/export", requireAuth, privateInstallOnly, async (_request, response) => {
     const workspace = await store.read();
     const exportedWorkspace = ordinaryExportWorkspace(workspace);
     response.setHeader("Content-Type", "application/json; charset=utf-8");
@@ -305,43 +349,32 @@ export function createApp({
     }
   });
 
-  app.get("/api/export/map.:format", requireAuth, mapExportLimit, async (request, response, next) => {
+  app.post("/api/demo/export/map.:format", mapExportLimit, workspaceJson, async (request, response, next) => {
+    if (!publicDemo) return response.status(404).json({ error: "The browser-demo export route is not available." });
+    let workspace;
+    try {
+      const suppliedRevision = Number(request.body?.workspace?.revision);
+      const revision = Number.isInteger(suppliedRevision) && suppliedRevision >= 0 ? suppliedRevision : 0;
+      workspace = normalizeWorkspace(request.body?.workspace, { revision });
+    } catch (error) {
+      return response.status(400).json({ error: error.message || "The demo workspace is not valid." });
+    }
+    try {
+      const mapId = typeof request.body?.mapId === "string" ? request.body.mapId : "";
+      const focusId = typeof request.body?.focusId === "string" ? request.body.focusId : null;
+      await sendMapExport(response, workspace, request.params.format, mapId, focusId);
+    } catch (error) {
+      if (error.code === "PDF_EXPORT_TOO_LARGE") return response.status(422).json({ error: error.message });
+      next(error);
+    }
+  });
+
+  app.get("/api/export/map.:format", requireAuth, privateInstallOnly, mapExportLimit, async (request, response, next) => {
     try {
       const workspace = await store.read();
       const mapId = typeof request.query.mapId === "string" ? request.query.mapId : "";
       const focusId = typeof request.query.focusId === "string" ? request.query.focusId : null;
-      const map = workspace.maps.find((entry) => entry.id === mapId);
-      if (!map) return response.status(400).json({ error: "Choose a map before exporting." });
-      const focus = focusId ? workspace.nodes.find((node) => node.id === focusId && node.mapId === mapId && !node.trashedAt) : null;
-      const slug = safeExportSlug(focus ? `${map.title}-${focus.title}` : map.title);
-      response.setHeader("Cache-Control", "private, no-store");
-      if (request.params.format === "pdf") {
-        const document = await renderMapPdf(workspace, mapId, focus?.id ?? null);
-        response.setHeader("Content-Type", "application/pdf");
-        response.setHeader("Content-Disposition", `attachment; filename="${slug}.pdf"`);
-        return response.send(document);
-      }
-      if (request.params.format === "svg") {
-        response.setHeader("Content-Type", "image/svg+xml; charset=utf-8");
-        response.setHeader("Content-Disposition", `attachment; filename="${slug}.svg"`);
-        return response.send(renderMapSvg(workspace, mapId, focus?.id ?? null));
-      }
-      if (request.params.format === "md") {
-        response.setHeader("Content-Type", "text/markdown; charset=utf-8");
-        response.setHeader("Content-Disposition", `attachment; filename="${slug}.md"`);
-        return response.send(renderMapMarkdown(workspace, mapId, focus?.id ?? null));
-      }
-      if (request.params.format === "txt") {
-        response.setHeader("Content-Type", "text/plain; charset=utf-8");
-        response.setHeader("Content-Disposition", `attachment; filename="${slug}.txt"`);
-        return response.send(renderMapText(workspace, mapId, focus?.id ?? null));
-      }
-      if (request.params.format === "csv") {
-        response.setHeader("Content-Type", "text/csv; charset=utf-8");
-        response.setHeader("Content-Disposition", `attachment; filename="${slug}-project-handoff.csv"`);
-        return response.send(renderMapCsv(workspace, mapId, focus?.id ?? null));
-      }
-      response.status(404).json({ error: "That export format is not available." });
+      await sendMapExport(response, workspace, request.params.format, mapId, focusId);
     } catch (error) {
       if (error.code === "PDF_EXPORT_TOO_LARGE") return response.status(422).json({ error: error.message });
       next(error);

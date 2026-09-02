@@ -1,12 +1,10 @@
 import { Container } from "@cloudflare/containers";
-import { env } from "cloudflare:workers";
 
 export class AuDHDMapDemo extends Container {
   defaultPort = 3010;
   sleepAfter = "2h";
   envVars = {
     AUDHDMAP_ADMIN_USERNAME: "demo",
-    AUDHDMAP_SESSION_SECRET: env.AUDHDMAP_SESSION_SECRET,
     AUDHDMAP_TRUST_PROXY: "1",
     AUDHDMAP_PUBLIC_DEMO: "1",
   };

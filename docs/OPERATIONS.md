@@ -127,9 +127,9 @@ Avoid relying on the moving `edge` tag for a controlled installation. Use the ca
 
 ## Promote the hosted demo
 
-The Cloudflare deployment package under `cloudflare-demo` builds the repository Dockerfile and routes `audhdmap.com` to one named container. The root path serves the product website. `/demo` uses explicit public-demo mode, which opens a shared workspace without a password and exercises the same map editing and export renderers as a BoxPilot installation.
+The Cloudflare deployment package under `cloudflare-demo` builds the repository Dockerfile and routes `audhdmap.com` to one named container. The root path serves the product website. `/demo` uses explicit public-demo mode. It loads checked-in sample data in the browser and saves changes only to that tab's `sessionStorage`.
 
-Public-demo mode is intentionally narrower than a private installation. It allows workspace editing plus PDF, SVG, Markdown, plain-text, project CSV, and data-only JSON exports. Complete backup, restore, import, recovery-point, attachment, and permanent-delete routes fail with `403`. The interface hides those controls and labels the workspace as shared and temporary. Do not enable `AUDHDMAP_PUBLIC_DEMO=1` for a private BoxPilot or Docker installation.
+Public-demo mode does not initialize `/data`, issue login sessions, or expose workspace storage routes. PDF, SVG, Markdown, plain-text, and project CSV exports use one bounded no-store request and are not persisted. Complete backup, restore, import, recovery-point, attachment, permanent-delete, JSON export, and normal map-export routes fail with `403`. Do not enable `AUDHDMAP_PUBLIC_DEMO=1` for a private BoxPilot or Docker installation.
 
 Promote only after the milestone commit, version tag, automated tests, and public multi-platform image have passed:
 
@@ -140,11 +140,11 @@ npm run check
 npm run deploy
 ```
 
-On the first deployment, store a random `AUDHDMAP_SESSION_SECRET` with `wrangler secret put`. Do not place it in source. After every promotion, verify `/api/health`, load the product site, open `/demo` without a login, open Export, download the current map as PDF, inspect the returned file, and verify a private-only route such as `/api/export/backup.zip` returns `403` before calling the hosted demo current.
+After every promotion, verify `/api/health`, load the product site, open `/demo` without a login, confirm edits survive a reload but do not appear in a second tab, download the current map as PDF, inspect the returned file, and verify `/api/workspace` plus a private-only route such as `/api/export/backup.zip` return `403` before calling the hosted demo current.
 
-The demo's container-local `/data` is not a production backup target. A replacement or rollout can return it to the seed workspace. Keep real work in a durable BoxPilot or Docker deployment.
+The demo has no server workspace. Closing its tab removes its browser workspace. Keep real work in a durable BoxPilot or Docker deployment.
 
-## Limits in 0.7.2
+## Limits in 0.8.0
 
 - 200 maps
 - 10,000 thoughts

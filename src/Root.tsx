@@ -1,5 +1,6 @@
 import { FormEvent, lazy, Suspense, useEffect, useState } from "react";
 import { loadSiteConfig, loadWorkspace, login, session } from "./api";
+import { loadDemoWorkspace, resetDemoWorkspace, saveDemoWorkspace } from "./demoWorkspace";
 import type { Workspace } from "./model";
 import { LandingPage } from "./LandingPage";
 
@@ -21,6 +22,7 @@ export function Root() {
       if (!active) return;
       const path = location.pathname.replace(/\/+$/, "") || "/";
       if (config.publicSite && path === "/") return setState({ kind: "landing" });
+      if (config.publicDemo) return setState({ kind: "ready", workspace: loadDemoWorkspace(), username: "demo", publicDemo: true });
       const current = await session();
       if (!active) return;
       if (!current.authenticated || !current.username) return setState({ kind: "login" });
@@ -34,7 +36,7 @@ export function Root() {
   if (state.kind === "landing") return <LandingPage />;
   if (state.kind === "error") return <div className="boot-screen error-screen"><div className="boot-mark">AuDHDMAP</div><strong>Could not open the workspace</strong><p>{state.message}</p><button onClick={() => location.reload()}>Try again</button></div>;
   if (state.kind === "login") return <LoginScreen initialError={state.error} onReady={(workspace, username) => setState({ kind: "ready", workspace, username, publicDemo: false })} />;
-  return <Suspense fallback={<div className="boot-screen"><div className="boot-mark">AuDHDMAP</div><span>Preparing the visual workspace...</span></div>}><WorkspaceApp initialWorkspace={state.workspace} username={state.username} publicDemo={state.publicDemo} onSignedOut={() => setState({ kind: "login" })} /></Suspense>;
+  return <Suspense fallback={<div className="boot-screen"><div className="boot-mark">AuDHDMAP</div><span>Preparing the visual workspace...</span></div>}><WorkspaceApp initialWorkspace={state.workspace} username={state.username} publicDemo={state.publicDemo} saveWorkspaceData={state.publicDemo ? saveDemoWorkspace : undefined} onResetDemo={state.publicDemo ? () => { resetDemoWorkspace(); location.reload(); } : undefined} onSignedOut={() => setState({ kind: "login" })} /></Suspense>;
 }
 
 function LoginScreen({ initialError, onReady }: { initialError?: string; onReady: (workspace: Workspace, username: string) => void }) {

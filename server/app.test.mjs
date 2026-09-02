@@ -18,7 +18,7 @@ async function setup({ trustProxy = false, maxBackupBytes, readinessError = null
   const store = createWorkspaceStore({ dataDirectory: directory, now: () => new Date("2026-09-01T12:00:00.000Z") });
   await store.initialize();
   if (readinessError) store.readiness = async () => { throw readinessError; };
-  const app = createApp({ store, adminUsername: "owner", adminPassword, sessionSecret: "test-session-secret-is-long-enough", trustProxy, maxBackupBytes, requestLimits, publicDemo, now: () => Date.parse("2026-09-01T12:00:00.000Z"), distDirectory: path.join(directory, "missing-dist") });
+  const app = createApp({ store, adminUsername: "owner", adminPassword, sessionSecret: publicDemo ? undefined : "test-session-secret-is-long-enough", trustProxy, maxBackupBytes, requestLimits, publicDemo, now: () => Date.parse("2026-09-01T12:00:00.000Z"), distDirectory: path.join(directory, "missing-dist") });
   const server = await new Promise((resolve) => { const listening = app.listen(0, "127.0.0.1", () => resolve(listening)); });
   resources.push({ server, directory });
   const address = server.address();
@@ -46,8 +46,8 @@ describe("AuDHDMAP API", () => {
     expect((await fetch(`${base}/api/health`, { headers: { "x-forwarded-proto": "https" } })).headers.get("strict-transport-security")).toBeNull();
   });
 
-  it("opens the shared demo without a password while blocking private-install operations", async () => {
-    const { base } = await setup({ publicDemo: true, adminPassword: "" });
+  it("keeps the browser demo stateless while providing transient map exports", async () => {
+    const { base, store } = await setup({ publicDemo: true, adminPassword: "" });
     const config = await fetch(`${base}/api/config`);
     expect(await config.json()).toEqual({ publicSite: true, publicDemo: true });
 
@@ -61,20 +61,28 @@ describe("AuDHDMAP API", () => {
     expect(login.status).toBe(404);
     expect(await login.json()).toEqual({ error: "The public demo does not require a password." });
 
-    const workspace = await (await fetch(`${base}/api/workspace`)).json();
-    workspace.maps[0].title = "Edited in the public sandbox";
-    const saved = await fetch(`${base}/api/workspace`, {
+    const original = await store.read();
+    const workspace = structuredClone(original);
+    workspace.maps[0].title = "Edited only in this export request";
+    const blockedSave = await fetch(`${base}/api/workspace`, {
       method: "PUT",
       headers: { "content-type": "application/json", "x-audhdmap-request": "1" },
       body: JSON.stringify({ workspace, expectedRevision: 0 }),
     });
-    expect(saved.status).toBe(200);
-    expect((await saved.json()).revision).toBe(1);
+    expect((await fetch(`${base}/api/workspace`)).status).toBe(403);
+    expect(blockedSave.status).toBe(403);
+    expect((await fetch(`${base}/api/export/map.pdf?mapId=map-home-server`)).status).toBe(403);
 
-    const pdf = await fetch(`${base}/api/export/map.pdf?mapId=map-home-server`);
+    const pdf = await fetch(`${base}/api/demo/export/map.pdf`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-audhdmap-request": "1" },
+      body: JSON.stringify({ workspace, mapId: "map-home-server", focusId: null }),
+    });
     expect(pdf.status).toBe(200);
     expect(pdf.headers.get("content-type")).toBe("application/pdf");
+    expect(pdf.headers.get("cache-control")).toBe("private, no-store");
     expect(Buffer.from(await pdf.arrayBuffer()).subarray(0, 4).toString()).toBe("%PDF");
+    expect(await store.read()).toEqual(original);
 
     const blocked = [
       await fetch(`${base}/api/snapshots`),
@@ -85,7 +93,7 @@ describe("AuDHDMAP API", () => {
     ];
     for (const response of blocked) {
       expect(response.status).toBe(403);
-      expect(await response.json()).toEqual({ error: "This operation is disabled in the shared public demo." });
+      expect(await response.json()).toEqual({ error: "This operation is disabled in the browser demo." });
     }
   });
 

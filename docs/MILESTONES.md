@@ -95,6 +95,16 @@ Status: shipped
 - The interface labels public data as shared and temporary, links back to the product site, and explains where the complete private toolset is available.
 - API and interaction regression tests cover anonymous entry, editable state, PDF output, private-operation denial, public controls, screenshots, and self-hosting links.
 
+## 0.8.0 - Browser-only hosted demo
+
+Status: shipped
+
+- Each demo tab starts from sample data, saves only to `sessionStorage`, survives a reload in that tab, and resets when the tab closes or the user selects Reset demo.
+- Public workspace APIs and every durable or destructive server operation return `403`; the Cloudflare container does not initialize `/data` or require a session secret.
+- Map exports use a dedicated bounded no-store request. The server validates and renders the supplied map without adding it to a workspace store.
+- Normal BoxPilot and Docker installations retain owner authentication, persistent `/data`, complete backup and restore, attachments, recovery points, and permanent deletion.
+- Automated and browser checks cover tab isolation, reload persistence, reset, transient PDF output, blocked storage routes, and unchanged private-install behavior.
+
 ## Later gates
 
 Collaboration, cloud synchronization, OCR, speech capture, and automated link retrieval remain outside the core until local recovery, export stability, and large-map performance are proven. These features must not weaken offline ownership or make a third-party account mandatory.

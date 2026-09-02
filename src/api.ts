@@ -134,6 +134,28 @@ export function mapExportUrl(format: "pdf" | "svg" | "md" | "txt" | "csv", mapId
   return `/api/export/map.${format}?${query}`;
 }
 
+export type MapExportFormat = "pdf" | "svg" | "md" | "txt" | "csv";
+
+export async function exportDemoMap(workspace: Workspace, format: MapExportFormat, mapId: string, focusId: string | null) {
+  const response = await fetch(`/api/demo/export/map.${format}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...mutationHeaders },
+    body: JSON.stringify({ workspace, mapId, focusId }),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.error || `Request failed with status ${response.status}.`);
+  }
+  const disposition = response.headers.get("content-disposition") ?? "";
+  const encodedName = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+  const simpleName = disposition.match(/filename="([^"]+)"/i)?.[1];
+  let filename = simpleName ?? `audhdmap-export.${format}`;
+  if (encodedName) {
+    try { filename = decodeURIComponent(encodedName); } catch { /* use the safe fallback */ }
+  }
+  return { blob: await response.blob(), filename };
+}
+
 export async function uploadAttachment(file: File) {
   return parse<Attachment>(await fetch("/api/attachments", {
     method: "POST",

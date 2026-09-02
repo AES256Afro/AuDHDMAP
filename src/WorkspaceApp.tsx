@@ -3,9 +3,9 @@ import { marked } from "marked";
 import type { ResizeParams } from "@xyflow/react";
 import { ChangeEvent, DragEvent, type KeyboardEvent as ReactKeyboardEvent, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import {
-  createRecoveryPoint, deleteAttachment, importWorkspace, listRecoveryPoints, logout, mapExportUrl, previewWorkspaceImport,
+  createRecoveryPoint, deleteAttachment, exportDemoMap, importWorkspace, listRecoveryPoints, logout, mapExportUrl, previewWorkspaceImport,
   purgeTrashedThought, restoreBackup, restoreRecoveryPoint, saveWorkspace, uploadAttachment,
-  type ImportPreviewResult, type RecoveryPointList,
+  type ImportPreviewResult, type MapExportFormat, type RecoveryPointList,
 } from "./api";
 import { CanvasView } from "./CanvasView";
 import {
@@ -18,6 +18,8 @@ interface Props {
   initialWorkspace: Workspace;
   username: string;
   publicDemo?: boolean;
+  saveWorkspaceData?: (workspace: Workspace, expectedRevision: number) => Promise<Workspace>;
+  onResetDemo?: () => void;
   onSignedOut: () => void;
 }
 
@@ -62,7 +64,7 @@ function useDialogFocus() {
   return { dialogRef, onDialogKeyDown };
 }
 
-export function WorkspaceApp({ initialWorkspace, username, publicDemo = false, onSignedOut }: Props) {
+export function WorkspaceApp({ initialWorkspace, username, publicDemo = false, saveWorkspaceData = saveWorkspace, onResetDemo, onSignedOut }: Props) {
   const [workspace, setWorkspace] = useState(initialWorkspace);
   const [activeMapId, setActiveMapId] = useState(initialWorkspace.maps[0].id);
   const [view, setView] = useState<ViewMode>("canvas");
@@ -84,6 +86,7 @@ export function WorkspaceApp({ initialWorkspace, username, publicDemo = false, o
   const [saveError, setSaveError] = useState("");
   const [changeVersion, setChangeVersion] = useState(0);
   const [toast, setToast] = useState("");
+  const [resetDemoPending, setResetDemoPending] = useState(false);
   const [recentLocations, setRecentLocations] = useState<string[]>([`map:${initialWorkspace.maps[0].id}`]);
   const workspaceRef = useRef(workspace);
   const revisionRef = useRef(workspace.revision);
@@ -129,7 +132,7 @@ export function WorkspaceApp({ initialWorkspace, username, publicDemo = false, o
     queueRef.current = queueRef.current.then(async () => {
       setSaveState("saving"); saveStateRef.current = "saving";
       try {
-        const saved = await saveWorkspace(snapshot, revisionRef.current);
+        const saved = await saveWorkspaceData(snapshot, revisionRef.current);
         revisionRef.current = saved.revision;
         workspaceRef.current = { ...workspaceRef.current, revision: saved.revision };
         setWorkspace((current) => ({ ...current, revision: saved.revision }));
@@ -141,7 +144,7 @@ export function WorkspaceApp({ initialWorkspace, username, publicDemo = false, o
         setSaveState("failed"); saveStateRef.current = "failed"; setSaveError(error instanceof Error ? error.message : "Autosave failed.");
       }
     });
-  }, []);
+  }, [saveWorkspaceData]);
 
   useEffect(() => {
     if (changeVersion === 0) return;
@@ -402,6 +405,7 @@ export function WorkspaceApp({ initialWorkspace, username, publicDemo = false, o
   }
 
   async function openExport() {
+    if (publicDemo) { setExportOpen(true); return; }
     if (!await ensureSaved("Save the workspace successfully before exporting.")) return;
     setExportOpen(true);
   }
@@ -559,6 +563,7 @@ export function WorkspaceApp({ initialWorkspace, username, publicDemo = false, o
       }
       if (quickSwitcherOpen || quickCaptureOpen || pendingImport || trashOpen || helpOpen || settingsOpen || exportOpen) return;
       if (["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName) || target.isContentEditable) return;
+      if (target instanceof Element && target.closest("button, a, [role='button'], [role='link']")) return;
       if (event.repeat && ["n", "q", "tab", "enter"].includes(event.key.toLowerCase())) return;
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") { event.preventDefault(); event.shiftKey ? redo() : undo(); return; }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "y") { event.preventDefault(); redo(); return; }
@@ -583,19 +588,19 @@ export function WorkspaceApp({ initialWorkspace, username, publicDemo = false, o
   return <div className="app-shell" style={{ filter: `brightness(${workspace.settings.brightness}%) saturate(${workspace.settings.saturation}%)` }}>
     <aside className="workspace-rail">
       <div className="brand"><span className="brand-network" aria-hidden="true">⌘</span><div><strong>AuDHDMAP</strong><small>{themeLabels[workspace.settings.theme]}</small></div></div>
-      {publicDemo && <div className="public-demo-badge"><span>●</span><strong>Public sandbox</strong><small>Shared and temporary</small></div>}
+      {publicDemo && <div className="public-demo-badge"><span>●</span><strong>Browser demo</strong><small>This tab only</small></div>}
       <button className="new-thought" onClick={() => createThought(selected?.id ?? null)}><span>＋</span> New thought</button>
       <button className="quick-capture-button" onClick={() => setQuickCaptureOpen(true)}><span>≡</span> Quick capture <kbd>Q</kbd></button>
       <button className="quick-switcher-button" onClick={() => setQuickSwitcherOpen(true)}><span>⌘</span> Jump anywhere <kbd>⌘K</kbd></button>
       <label className="search-box"><span>⌕</span><input ref={searchRef} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search maps and notes" /></label>
       {search ? <div className="search-results"><span>{searchResults.length} results</span>{searchResults.map((node) => <button key={node.id} onClick={() => { navigateToNode(node.id); setSearch(""); }}><strong>{node.title}</strong><small>{mapById.get(node.mapId)?.title}</small></button>)}</div> : <nav className="map-list" aria-label="Maps"><div className="rail-heading"><span>Maps</span><button aria-label="Add map" onClick={addMap}>＋</button></div>{workspace.maps.map((map) => <button key={map.id} className={activeMapId === map.id ? "active" : ""} onClick={() => navigateToMap(map.id)}><span>⌂</span><span>{map.title}</span><small>{nodeCountByMap.get(map.id) ?? 0}</small></button>)}</nav>}
-      <div className="rail-bottom"><button onClick={() => setTrashOpen(true)}>♲ <span>Trash</span>{trashedNodes.length > 0 && <small>{trashedNodes.length}</small>}</button><button onClick={() => setSettingsOpen(true)}>⚙ <span>Visual settings</span></button><button onClick={() => setHelpOpen(true)}>? <span>Help and shortcuts</span></button>{publicDemo ? <a href="/">← <span>Back to website</span></a> : <button onClick={signOut}>⇥ <span>Sign out {username}</span></button>}</div>
+      <div className="rail-bottom"><button onClick={() => setTrashOpen(true)}>♲ <span>Trash</span>{trashedNodes.length > 0 && <small>{trashedNodes.length}</small>}</button><button onClick={() => setSettingsOpen(true)}>⚙ <span>Visual settings</span></button><button onClick={() => setHelpOpen(true)}>? <span>Help and shortcuts</span></button>{publicDemo && <button className={resetDemoPending ? "confirm-demo-reset" : ""} onBlur={() => setResetDemoPending(false)} onClick={() => { if (!resetDemoPending) setResetDemoPending(true); else onResetDemo?.(); }}>↺ <span>{resetDemoPending ? "Confirm reset" : "Reset demo"}</span></button>}{publicDemo ? <a href="/">← <span>Back to website</span></a> : <button onClick={signOut}>⇥ <span>Sign out {username}</span></button>}</div>
     </aside>
 
     <main className="workspace-main">
       <header className="view-header">
         <nav aria-label="Workspace views">{(Object.keys(viewLabels) as ViewMode[]).map((id) => <button key={id} className={view === id ? "active" : ""} onClick={() => setView(id)}><span>{id === "canvas" ? "⌘" : id === "outline" ? "☷" : id === "board" ? "▦" : id === "timeline" ? "◷" : "▤"}</span>{viewLabels[id]}</button>)}</nav>
-        <div className="document-status">{publicDemo && <span className="demo-status">PUBLIC DEMO</span>}<button aria-label="Undo" onClick={undo}>↶</button><button aria-label="Redo" onClick={redo}>↷</button><span className={`save-state ${saveState}`} role="status" aria-live="polite" title={saveError}>{saveState === "saved" ? "✓ Saved" : saveState === "saving" ? "Saving..." : saveState === "failed" ? "Save failed" : "Unsaved"}</span>{saveState === "failed" && <button className="retry-save" title={saveError} onClick={enqueueSave}>Retry save</button>}<button onClick={openExport} title={publicDemo ? "Export this map" : "Export and restore"}>⇩ Export</button>{!publicDemo && <><button onClick={() => importRef.current?.click()}>⇧ Import JSON</button><input ref={importRef} hidden type="file" accept="application/json,.json" onChange={handleImport} /></>}</div>
+        <div className="document-status">{publicDemo && <span className="demo-status">BROWSER DEMO</span>}<button aria-label="Undo" onClick={undo}>↶</button><button aria-label="Redo" onClick={redo}>↷</button><span className={`save-state ${saveState}`} role="status" aria-live="polite" title={saveError}>{saveState === "saved" ? publicDemo ? "✓ Saved in tab" : "✓ Saved" : saveState === "saving" ? "Saving..." : saveState === "failed" ? "Save failed" : "Unsaved"}</span>{saveState === "failed" && <button className="retry-save" title={saveError} onClick={enqueueSave}>Retry save</button>}<button onClick={openExport} title={publicDemo ? "Export this map" : "Export and restore"}>⇩ Export</button>{!publicDemo && <><button onClick={() => importRef.current?.click()}>⇧ Import JSON</button><input ref={importRef} hidden type="file" accept="application/json,.json" onChange={handleImport} /></>}</div>
       </header>
       {focusId && <div className="focus-banner"><nav aria-label="Focused branch path"><span>{activeMap.title}</span>{focusPath.map((node, index) => <button key={node.id} aria-current={index === focusPath.length - 1 ? "location" : undefined} onClick={() => setFocusId(node.id)}>› {node.title}</button>)}</nav><button onClick={() => setFocusId(null)}>Exit focus</button></div>}
       {view === "canvas" && <div className="canvas-shell">
@@ -762,7 +767,7 @@ function TrashDialog({ nodes, maps, publicDemo, purgingId, onRestore, onPurge, o
   useEffect(() => { if (confirmId && !nodes.some((node) => node.id === confirmId)) setConfirmId(null); }, [confirmId, nodes]);
   return <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && !purgingId && onClose()}><section ref={dialogRef} onKeyDown={onDialogKeyDown} className={`trash-dialog ${publicDemo ? "public-demo-trash" : ""}`} role="dialog" aria-modal="true" aria-labelledby="trash-title">
     <header><div><span className="eyebrow">Deleted thoughts</span><h2 id="trash-title">Trash</h2></div><button autoFocus aria-label="Close trash" disabled={Boolean(purgingId)} onClick={onClose}>×</button></header>
-    <p>{publicDemo ? "Trashed thoughts stay out of maps, search, projects, and exports. You can restore them while this shared sandbox is available." : "Trashed thoughts stay out of maps, search, projects, and ordinary exports. Complete ZIP backups still include them and their attachments."}</p>
+    <p>{publicDemo ? "Trashed thoughts stay out of maps, search, projects, and exports. You can restore them until this browser tab is closed." : "Trashed thoughts stay out of maps, search, projects, and ordinary exports. Complete ZIP backups still include them and their attachments."}</p>
     {ordered.length === 0 ? <div className="trash-empty"><span>♲</span><strong>Trash is empty</strong><small>Deleting a thought moves it here first.</small></div> : <><div className="trash-list">{visible.map((node) => <article key={node.id}>
       <div><strong>{node.title}</strong><small>{mapById.get(node.mapId)?.title ?? "Unknown map"} · {node.attachments.length} attachment{node.attachments.length === 1 ? "" : "s"}</small></div>
       <button disabled={Boolean(purgingId)} onClick={() => { setConfirmId(null); onRestore(node.id); }}>Restore</button>
@@ -831,6 +836,8 @@ function ExportDialog({ workspace, mapId, focusId, publicDemo, restoring, onRest
   const [backup, setBackup] = useState<File | null>(null);
   const [recoveryPoints, setRecoveryPoints] = useState<RecoveryPointList | null>(null);
   const [recoveryError, setRecoveryError] = useState("");
+  const [demoExportBusy, setDemoExportBusy] = useState<MapExportFormat | "">("");
+  const [demoExportError, setDemoExportError] = useState("");
   const [recoveryBusy, setRecoveryBusy] = useState<"" | "loading" | "creating" | `restore:${string}`>(publicDemo ? "" : "loading");
   const [confirmRecoveryId, setConfirmRecoveryId] = useState<string | null>(null);
   const map = workspace.maps.find((entry) => entry.id === mapId)!;
@@ -839,7 +846,26 @@ function ExportDialog({ workspace, mapId, focusId, publicDemo, restoring, onRest
   const activeMapThoughts = workspace.nodes.filter((node) => node.mapId === mapId && isActiveThought(node));
   const pdfThoughtCount = focus ? descendantThoughtIds(activeMapThoughts, mapId, focus.id).size : activeMapThoughts.length;
   const pdfTooLarge = pdfThoughtCount > PDF_THOUGHT_LIMIT;
-  const busy = restoring || Boolean(recoveryBusy);
+  const busy = restoring || Boolean(recoveryBusy) || Boolean(demoExportBusy);
+
+  async function downloadDemoExport(format: MapExportFormat) {
+    setDemoExportBusy(format); setDemoExportError("");
+    try {
+      const { blob, filename } = await exportDemoMap(workspace, format, mapId, focusId);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url; link.download = filename; link.style.display = "none";
+      document.body.append(link); link.click(); link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    } catch (error) {
+      setDemoExportError(error instanceof Error ? error.message : "The export could not be created.");
+    } finally { setDemoExportBusy(""); }
+  }
+
+  function exportChoice(format: MapExportFormat, title: string, description: string) {
+    if (publicDemo) return <button disabled={busy} onClick={() => void downloadDemoExport(format)}><strong>{demoExportBusy === format ? "Creating..." : title}</strong><span>{description}</span></button>;
+    return <a href={mapExportUrl(format, mapId, focusId)} download><strong>{title}</strong><span>{description}</span></a>;
+  }
 
   async function refreshRecoveryPoints() {
     setRecoveryBusy("loading"); setRecoveryError("");
@@ -866,12 +892,13 @@ function ExportDialog({ workspace, mapId, focusId, publicDemo, restoring, onRest
     <header><div><span className="eyebrow">File export and recovery</span><h2 id="export-title">Export and recovery</h2></div><button autoFocus aria-label="Close export" disabled={busy} onClick={onClose}>×</button></header>
     <section className="export-section"><div className="export-heading"><div><h3>Map exports</h3><p>{scope}. PDF includes a visual overview and readable outline.</p></div><span>{focus ? "BRANCH" : "MAP"}</span></div>
       <div className="export-grid">
-        {pdfTooLarge ? <div className="disabled-export" role="status"><strong>PDF</strong><span>Focus a branch of 1,000 thoughts or fewer</span></div> : <a href={mapExportUrl("pdf", mapId, focusId)} download><strong>PDF</strong><span>Map and outline</span></a>}
-        <a href={mapExportUrl("svg", mapId, focusId)} download><strong>SVG</strong><span>Scalable map image</span></a>
-        <a href={mapExportUrl("md", mapId, focusId)} download><strong>Markdown</strong><span>Editable outline</span></a>
-        <a href={mapExportUrl("txt", mapId, focusId)} download><strong>Plain text</strong><span>Indented outline</span></a>
-        <a href={mapExportUrl("csv", mapId, focusId)} download><strong>Project CSV</strong><span>Hierarchy, tasks, and references</span></a>
+        {pdfTooLarge ? <div className="disabled-export" role="status"><strong>PDF</strong><span>Focus a branch of 1,000 thoughts or fewer</span></div> : exportChoice("pdf", "PDF", "Map and outline")}
+        {exportChoice("svg", "SVG", "Scalable map image")}
+        {exportChoice("md", "Markdown", "Editable outline")}
+        {exportChoice("txt", "Plain text", "Indented outline")}
+        {exportChoice("csv", "Project CSV", "Hierarchy, tasks, and references")}
       </div>
+      {demoExportError && <div className="recovery-warning" role="alert">{demoExportError}</div>}
     </section>
     {!publicDemo && <><section className="export-section"><div className="export-heading"><div><h3>Back up everything</h3><p>The ZIP contains workspace data, every attachment, and SHA-256 integrity checks.</p></div><span>FULL</span></div>
       <div className="backup-actions"><a className="primary-button" href="/api/export/backup.zip" download>⇩ Complete ZIP backup</a><a href="/api/export" download>JSON data only</a></div>
@@ -894,7 +921,7 @@ function ExportDialog({ workspace, mapId, focusId, publicDemo, restoring, onRest
       <label className="backup-picker"><input type="file" accept="application/zip,.zip" disabled={busy} onChange={(event) => setBackup(event.target.files?.[0] ?? null)} /><span>{backup ? backup.name : "Choose an AuDHDMAP ZIP backup"}</span></label>
       {backup && <div className="restore-confirm"><p>This replaces the current workspace and attachments. AuDHDMAP creates a server recovery point for the current state first.</p><button className="danger-button" disabled={busy} onClick={() => onRestore(backup)}>{restoring ? "Validating and restoring..." : "Replace workspace from this backup"}</button></div>}
     </section></>}
-    {publicDemo && <section className="export-section demo-export-note"><div className="export-heading"><div><h3>Shared sandbox limits</h3><p>Complete backup, restore, import, recovery-point, attachment, and permanent-delete tools are available in private BoxPilot and Docker installations. They are disabled here to keep this anonymous demo safe.</p></div><span>DEMO</span></div><a href="https://github.com/AES256Afro/AuDHDMAP#run-with-docker-compose">See the private installation guide ↗</a></section>}
+    {publicDemo && <section className="export-section demo-export-note"><div className="export-heading"><div><h3>Browser demo storage</h3><p>Workspace changes stay in this browser tab and disappear when the tab is closed. Export sends this map for file generation and does not save it on the server. Complete backup, restore, import, recovery-point, attachment, and permanent-delete tools remain available in private installations.</p></div><span>TAB</span></div><a href="https://github.com/AES256Afro/AuDHDMAP#run-with-docker-compose">See the private installation guide ↗</a></section>}
   </section></div>;
 }
 
@@ -968,7 +995,7 @@ function Inspector({ workspace, selected, publicDemo, updateNode, deleteNode, na
       {references.map((edge) => { const relatedId = edge.source === thought.id ? edge.target : edge.source; const related = workspace.nodes.find((node) => node.id === relatedId); const map = workspace.maps.find((item) => item.id === related?.mapId); return <div className="reference-card" key={edge.id}><button onClick={() => related && navigateToNode(related.id)}><strong>{related?.title ?? "Missing thought"}</strong><small>{edge.label || "related"} · {map?.title}</small></button><button aria-label={`Remove link to ${related?.title}`} onClick={() => removeReference(edge.id)}>×</button></div>; })}
       <div className="reference-builder"><select aria-label="Thought to link" value={referenceTarget} onChange={(event) => setReferenceTarget(event.target.value)}><option value="">Choose any thought...</option>{workspace.maps.map((map) => <optgroup key={map.id} label={map.title}>{workspace.nodes.filter((node) => node.mapId === map.id && node.id !== thought.id && isActiveThought(node)).map((node) => <option key={node.id} value={node.id}>{node.title}</option>)}</optgroup>)}</select><input aria-label="Reference label" value={referenceLabel} onChange={(event) => setReferenceLabel(event.target.value)} placeholder="related" /><button disabled={!referenceTarget} onClick={() => { if (referenceTarget) { addReference(thought.id, referenceTarget, referenceLabel); setReferenceTarget(""); } }}>＋ Link thoughts</button></div>
     </section>
-    <section className="inspector-section attachments"><div className="section-heading"><h3>Media</h3>{publicDemo ? <span className="demo-limit-label">LINKS ONLY IN DEMO</span> : <><button disabled={uploading} onClick={() => inputRef.current?.click()}>{uploading ? "Uploading..." : "＋ File"}</button><input ref={inputRef} hidden multiple type="file" onChange={files} /></>}</div>
+    <section className="inspector-section attachments"><div className="section-heading"><h3>Media</h3>{publicDemo ? <span className="demo-limit-label">LINKS ONLY IN BROWSER DEMO</span> : <><button disabled={uploading} onClick={() => inputRef.current?.click()}>{uploading ? "Uploading..." : "＋ File"}</button><input ref={inputRef} hidden multiple type="file" onChange={files} /></>}</div>
       {!publicDemo && <><div className="attachment-drop" role="button" tabIndex={0} onClick={() => inputRef.current?.click()} onKeyDown={(event) => (event.key === "Enter" || event.key === " ") && inputRef.current?.click()} onDragOver={(event) => event.preventDefault()} onDrop={drop}>Drop files or a web link here</div>
       {selected.attachments.map((attachment) => <div className="attachment-card" key={attachment.id}>{isPreviewableImage(attachment.mime) ? <img src={`/api/attachments/${attachment.id}`} alt="" /> : <span>{attachment.mime === "application/pdf" ? "PDF" : "FILE"}</span>}<a href={`/api/attachments/${attachment.id}`} target="_blank" rel="noreferrer"><strong>{attachment.name}</strong><small>{formatBytes(attachment.size)}</small></a><button aria-label={`Remove ${attachment.name}`} onClick={() => removeAttachment(thought.id, attachment.id)}>×</button></div>)}</>}
       {selected.links.map((link) => <div className="web-link-card" key={link.id}><span>↗</span><a href={link.url} target="_blank" rel="noreferrer"><strong>{link.title}</strong><small>{new URL(link.url).hostname}</small></a><button aria-label={`Remove ${link.title}`} onClick={() => updateNode(thought.id, { links: thought.links.filter((item) => item.id !== link.id) })}>×</button></div>)}

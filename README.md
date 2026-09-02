@@ -4,7 +4,7 @@ AuDHDMAP is a private, self-hosted mind-mapping and note-taking workspace. Captu
 
 ![AuDHDMAP Signal Garden canvas](public/site/canvas-map.jpg)
 
-## What works in 0.7.2
+## What works in 0.8.0
 
 - Free pan-and-zoom canvas with draggable nodes, branches, two-way labeled references, editable group boundaries, grid snapping, and explicit tree or grid auto-layout.
 - Strict Branch Focus that shows the selected branch, its ancestors, descendants, and explicit references while hiding unrelated clutter.
@@ -55,9 +55,9 @@ See [Operations and recovery](docs/OPERATIONS.md) for backup drills, restore beh
 
 ## Hosted demo
 
-The product website is published at [audhdmap.com](https://audhdmap.com), with a passwordless shared sandbox at [audhdmap.com/demo](https://audhdmap.com/demo). It runs the same Docker application through one Cloudflare Container, including server-generated PDF, SVG, Markdown, text, and project CSV exports.
+The product website is published at [audhdmap.com](https://audhdmap.com), with a passwordless browser-only demo at [audhdmap.com/demo](https://audhdmap.com/demo). Each tab starts from checked-in sample data and saves edits only to that tab's `sessionStorage`. Reloading the same tab keeps its state; closing it removes the state. No demo workspace is read from or written to Cloudflare storage.
 
-The public sandbox deliberately disables complete backup, restore, JSON import, recovery-point, attachment, and permanent-delete operations. Treat every hosted thought as public and temporary. Its shared container-local `/data` can reset during a replacement or rollout. Install through BoxPilot or Docker for authenticated, durable private notes and the complete recovery toolset.
+PDF, SVG, Markdown, text, and project CSV export send the selected map to a bounded, no-store endpoint that returns the generated file without persisting the request. Complete backup, restore, JSON import, recovery-point, attachment, and permanent-delete operations remain disabled in the demo. Install through BoxPilot or Docker for authenticated, durable private notes and the complete recovery toolset.
 
 ## Run for development
 
@@ -75,16 +75,16 @@ The development login is `owner` with password `boxpilot`. Development data is w
 ```sh
 npm run check
 npm audit
-docker build -t audhdmap:0.7.2 .
+docker build -t audhdmap:0.8.0 .
 ```
 
-The health endpoint is available without authentication at `/api/health`. It reports only application version, storage readiness, revision, bounded object counts, and recovery-point health counts. It never returns workspace content, filenames, point identifiers, or error details.
+The health endpoint is available without authentication at `/api/health`. Private mode reports only application version, storage readiness, revision, bounded object counts, and recovery-point health counts. Browser-demo mode reports browser-tab persistence without workspace counts. It never returns workspace content, filenames, point identifiers, or error details.
 
 ## BoxPilot
 
 The production image is designed for BoxPilot's generic application catalog:
 
-- image: `ghcr.io/aes256afro/audhdmap:0.7.2`
+- image: `ghcr.io/aes256afro/audhdmap:0.8.0`
 - container port: `3010`
 - persistent volume: `/data`
 - required generated secrets: `AUDHDMAP_ADMIN_PASSWORD` and `AUDHDMAP_SESSION_SECRET`

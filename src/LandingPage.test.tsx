@@ -12,8 +12,8 @@ describe("AuDHDMAP product website", () => {
     const demoLinks = screen.getAllByRole("link", { name: /demo/i });
     expect(demoLinks.length).toBeGreaterThanOrEqual(3);
     expect(demoLinks.every((link) => link.getAttribute("href") === "/demo")).toBe(true);
-    expect(screen.getByText("Passwordless demo")).not.toBeNull();
-    expect(screen.getByText(/Do not enter private information/i)).not.toBeNull();
+    expect(screen.getByText("Browser-only demo")).not.toBeNull();
+    expect(screen.getByText(/Changes stay in the current tab/i)).not.toBeNull();
     expect(screen.getByRole("img", { name: /signal-green canvas/i }).getAttribute("src")).toBe("/site/canvas-map.jpg");
     expect(screen.getByRole("img", { name: /outline view/i }).getAttribute("src")).toBe("/site/outline-view.jpg");
     expect(screen.getByRole("img", { name: /export panel/i }).getAttribute("src")).toBe("/site/export-panel.jpg");
