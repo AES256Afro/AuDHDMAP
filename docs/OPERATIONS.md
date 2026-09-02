@@ -144,7 +144,7 @@ On the first deployment, store a random `AUDHDMAP_SESSION_SECRET` with `wrangler
 
 The demo's container-local `/data` is not a production backup target. A replacement or rollout can return it to the seed workspace. Keep real work in a durable BoxPilot or Docker deployment.
 
-## Limits in 0.7.0
+## Limits in 0.7.1
 
 - 200 maps
 - 10,000 thoughts

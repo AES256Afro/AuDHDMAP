@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.1
+
+- Replace promotional website copy with concise technical descriptions of the application, runtime, storage, views, exports, deployment requirements, and public-demo limits.
+
 ## 0.7.0
 
 - Add a responsive CRT-inspired product website at `audhdmap.com` with real Canvas, Outline, and Export screenshots, feature guidance, self-hosting details, and direct demo links.
