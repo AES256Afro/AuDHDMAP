@@ -69,7 +69,7 @@ Acceptance criteria:
 - Import confirmation is bound to the exact previewed payload and current revision. The server validates both again and requires a recovery point before replacement.
 - Checked-in JSON and CSV fixtures, API tests, UI tests, and the supported-limit benchmark cover compatibility and the full preview-confirm path.
 
-## 0.6.1 through 0.6.7 - Hardened daily interaction
+## 0.6.1 through 0.6.8 - Hardened daily interaction
 
 Status: shipped
 
@@ -79,7 +79,7 @@ Status: shipped
 - Malformed cookie encoding fails closed, public health failures hide internal error details, and Unicode attachment names survive safe request and download headers.
 - Existing workspace access failures stop startup without replacing stored data; only a truly absent file receives the initial seed workspace.
 - Every authenticated workspace, export, recovery, and attachment response prevents shared or browser cache retention.
-- Filesystem-heavy restore, attachment, and application fallback routes enforce bounded per-IP request rates before doing their expensive work.
+- Filesystem-heavy restore, attachment, export, and application fallback routes enforce bounded per-IP request rates before doing their expensive work.
 - API and interaction regression tests cover parser order, both body ceilings, malformed JSON and cookies, bounded health failures, Unicode filenames, fail-closed startup, focus containment, and focus restoration.
 
 ## Later gates

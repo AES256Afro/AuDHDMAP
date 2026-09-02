@@ -142,7 +142,7 @@ On the first deployment, store `AUDHDMAP_DEMO_PASSWORD` and a random `AUDHDMAP_S
 
 The demo's container-local `/data` is not a production backup target. A replacement or rollout can return it to the seed workspace. Keep real work in a durable BoxPilot or Docker deployment.
 
-## Limits in 0.6.7
+## Limits in 0.6.8
 
 - 200 maps
 - 10,000 thoughts
@@ -155,6 +155,8 @@ The demo's container-local `/data` is not a production backup target. A replacem
 - 8 MiB workspace/import JSON payload; 64 KiB for login and small mutations
 - 512 MiB compressed backup upload
 - 2 GiB expanded backup and 20,010 ZIP entries
+- 12 complete ZIP exports per client per 15 minutes
+- 60 map or focused-branch exports per client per minute
 - 10 valid server recovery points
 - 200 initially rendered records per structured view page
 - 100 initially rendered Trash records

@@ -2,7 +2,7 @@
 
 ## Intended boundary
 
-AuDHDMAP 0.6.7 is a private, single-owner application. It is suitable for a trusted individual or household behind BoxPilot, a private network, a VPN, or a carefully configured HTTPS reverse proxy. It is not a multi-tenant collaboration service and does not implement per-map roles, public sharing, or anonymous write access.
+AuDHDMAP 0.6.8 is a private, single-owner application. It is suitable for a trusted individual or household behind BoxPilot, a private network, a VPN, or a carefully configured HTTPS reverse proxy. It is not a multi-tenant collaboration service and does not implement per-map roles, public sharing, or anonymous write access.
 
 ## Controls in this release
 
@@ -11,7 +11,7 @@ AuDHDMAP 0.6.7 is a private, single-owner application. It is suitable for a trus
 - Workspace, recovery, export, and attachment responses are marked no-store. Downloads additionally use a private cache policy so browsers and intermediaries cannot retain workspace or attachment content.
 - Session cookies are HTTP-only and SameSite Strict. They become Secure when HTTPS is reported by an explicitly trusted proxy.
 - Login credentials come from environment configuration and are compared with equal-length padded buffers through a timing-safe primitive. Failure state is bounded, stale entries are pruned, and repeated failures are temporarily throttled.
-- Backup restore, attachment upload and download, and application fallback routes apply bounded per-IP request limits before filesystem work.
+- Backup restore and creation, map export, attachment upload and download, and application fallback routes apply bounded per-IP request limits before filesystem or rendering work.
 - Malformed percent-encoded cookies fail closed as anonymous sessions instead of reaching the general error path.
 - Mutating API requests require a non-simple application header, so a cross-origin form cannot perform an authenticated mutation. Responses do not enable cross-origin access.
 - Response headers deny framing, object embedding, camera, microphone, and location access, restrict referrers and resource origins, and apply a same-origin content policy.

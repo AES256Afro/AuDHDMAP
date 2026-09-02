@@ -140,6 +140,8 @@ export function createApp({
     handler: (_request, response) => response.status(429).json({ error: message }),
   });
   const backupImportLimit = heavyRouteLimit(boundedLimit(requestLimits.backupImports, 6), 15 * 60_000, "Too many backup restores. Wait before trying again.");
+  const backupExportLimit = heavyRouteLimit(boundedLimit(requestLimits.backupExports, 12), 15 * 60_000, "Too many complete backups. Wait before trying again.");
+  const mapExportLimit = heavyRouteLimit(boundedLimit(requestLimits.mapExports, 60), 60_000, "Too many map exports. Wait before trying again.");
   const attachmentWriteLimit = heavyRouteLimit(boundedLimit(requestLimits.attachmentWrites, 30), 60_000, "Too many attachment uploads. Wait before trying again.");
   const attachmentReadLimit = heavyRouteLimit(boundedLimit(requestLimits.attachmentReads, 240), 60_000, "Too many attachment downloads. Wait before trying again.");
   const applicationPageLimit = heavyRouteLimit(boundedLimit(requestLimits.applicationPages, 300), 60_000, "Too many page requests. Wait before trying again.");
@@ -276,7 +278,7 @@ export function createApp({
     response.send(`${JSON.stringify({ exportedAt: new Date(now()).toISOString(), application: "AuDHDMAP", workspace: exportedWorkspace }, null, 2)}\n`);
   });
 
-  app.get("/api/export/backup.zip", requireAuth, async (_request, response, next) => {
+  app.get("/api/export/backup.zip", requireAuth, backupExportLimit, async (_request, response, next) => {
     try {
       const workspace = await store.read();
       const prepared = await prepareBackup({ workspace, attachmentDirectory: store.attachmentDirectory, version, now: () => new Date(now()) });
@@ -291,7 +293,7 @@ export function createApp({
     }
   });
 
-  app.get("/api/export/map.:format", requireAuth, async (request, response, next) => {
+  app.get("/api/export/map.:format", requireAuth, mapExportLimit, async (request, response, next) => {
     try {
       const workspace = await store.read();
       const mapId = typeof request.query.mapId === "string" ? request.query.mapId : "";

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.8
+
+- Bound complete ZIP creation to 12 requests per 15 minutes per client before attachment inspection and archive compression.
+- Bound current-map and focused-branch exports to 60 requests per minute per client before PDF generation or other export rendering.
+- Add direct regressions proving both expensive export paths stop with clear `429` responses before repeating their work.
+
 ## 0.6.7
 
 - Add recognized, bounded per-IP request limits to backup restore, attachment upload and download, and uncached application-page fallback routes.

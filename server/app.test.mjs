@@ -79,7 +79,7 @@ describe("AuDHDMAP API", () => {
   });
 
   it("rate-limits filesystem-heavy routes before repeating their work", async () => {
-    const { base } = await setup({ requestLimits: { backupImports: 1, attachmentWrites: 1, attachmentReads: 1 } });
+    const { base } = await setup({ requestLimits: { backupImports: 1, backupExports: 1, mapExports: 1, attachmentWrites: 1, attachmentReads: 1 } });
     const { cookie } = await signIn(base);
     const applicationHeaders = { cookie, "x-audhdmap-request": "1" };
     const uploaded = await fetch(`${base}/api/attachments`, { method: "POST", headers: { ...applicationHeaders, "content-type": "application/octet-stream", "x-file-name": "limited.txt", "x-file-type": "text/plain" }, body: "limited" });
@@ -96,6 +96,16 @@ describe("AuDHDMAP API", () => {
     const repeatedDownload = await fetch(`${base}/api/attachments/${attachment.id}`, { headers: { cookie } });
     expect(repeatedDownload.status).toBe(429);
     expect(await repeatedDownload.json()).toEqual({ error: "Too many attachment downloads. Wait before trying again." });
+
+    expect((await fetch(`${base}/api/export/map.txt?mapId=map-home-server`, { headers: { cookie } })).status).toBe(200);
+    const repeatedMapExport = await fetch(`${base}/api/export/map.pdf?mapId=map-home-server`, { headers: { cookie } });
+    expect(repeatedMapExport.status).toBe(429);
+    expect(await repeatedMapExport.json()).toEqual({ error: "Too many map exports. Wait before trying again." });
+
+    expect((await fetch(`${base}/api/export/backup.zip`, { headers: { cookie } })).status).toBe(200);
+    const repeatedBackupExport = await fetch(`${base}/api/export/backup.zip`, { headers: { cookie } });
+    expect(repeatedBackupExport.status).toBe(429);
+    expect(await repeatedBackupExport.json()).toEqual({ error: "Too many complete backups. Wait before trying again." });
 
     const restoreHeaders = { ...applicationHeaders, "content-type": "application/zip", "x-audhdmap-revision": "1" };
     expect((await fetch(`${base}/api/import/backup`, { method: "POST", headers: restoreHeaders, body: "not a zip" })).status).toBe(400);
