@@ -120,10 +120,11 @@ export function createApp({
   maxBackupBytes = 512 * 1024 * 1024,
   trustProxy = false,
   version = "development",
+  publicDemo = false,
   requestLimits = {},
 } = {}) {
   if (!store) throw new Error("store is required");
-  if (!adminPassword || String(adminPassword).length < 8) throw new Error("AUDHDMAP_ADMIN_PASSWORD must contain at least 8 characters");
+  if (!publicDemo && (!adminPassword || String(adminPassword).length < 8)) throw new Error("AUDHDMAP_ADMIN_PASSWORD must contain at least 8 characters");
   if (!sessionSecret || sessionSecret.length < 32) throw new Error("AUDHDMAP_SESSION_SECRET must contain at least 32 characters");
 
   const app = express();
@@ -166,6 +167,7 @@ export function createApp({
   app.use("/api", requireApplicationRequest);
 
   function sessionFor(request) {
+    if (publicDemo) return { username: "demo", expiresAt: Number.MAX_SAFE_INTEGER };
     return sessions.verify(parseCookies(request.get("cookie")).audhdmap_session);
   }
   function requireAuth(request, response, next) {
@@ -174,6 +176,15 @@ export function createApp({
     request.audhdmapUser = session.username;
     next();
   }
+  function privateInstallOnly(_request, response, next) {
+    if (publicDemo) return response.status(403).json({ error: "This operation is disabled in the shared public demo." });
+    next();
+  }
+
+  app.get("/api/config", (_request, response) => {
+    response.setHeader("Cache-Control", "no-store");
+    response.json({ publicSite: publicDemo, publicDemo });
+  });
 
   app.get("/api/health", async (_request, response) => {
     try {
@@ -192,6 +203,7 @@ export function createApp({
   });
 
   app.post("/api/auth/login", smallJson, (request, response) => {
+    if (publicDemo) return response.status(404).json({ error: "The public demo does not require a password." });
     const key = request.ip || "unknown";
     const cutoff = now() - 15 * 60_000;
     for (const [address, value] of failures) if (value.lastAttempt < cutoff && value.blockedUntil < now()) failures.delete(address);
@@ -239,12 +251,12 @@ export function createApp({
     }
   });
 
-  app.get("/api/snapshots", requireAuth, async (_request, response) => {
+  app.get("/api/snapshots", requireAuth, privateInstallOnly, async (_request, response) => {
     response.setHeader("Cache-Control", "private, no-store");
     response.json(await store.listSnapshots());
   });
 
-  app.post("/api/snapshots", requireAuth, smallJson, async (request, response) => {
+  app.post("/api/snapshots", requireAuth, privateInstallOnly, smallJson, async (request, response) => {
     const expectedRevision = Number(request.body?.expectedRevision);
     try {
       response.setHeader("Cache-Control", "private, no-store");
@@ -256,7 +268,7 @@ export function createApp({
     }
   });
 
-  app.post("/api/snapshots/:id/restore", requireAuth, smallJson, async (request, response) => {
+  app.post("/api/snapshots/:id/restore", requireAuth, privateInstallOnly, smallJson, async (request, response) => {
     const expectedRevision = Number(request.body?.expectedRevision);
     try {
       response.setHeader("Cache-Control", "private, no-store");
@@ -278,7 +290,7 @@ export function createApp({
     response.send(`${JSON.stringify({ exportedAt: new Date(now()).toISOString(), application: "AuDHDMAP", workspace: exportedWorkspace }, null, 2)}\n`);
   });
 
-  app.get("/api/export/backup.zip", requireAuth, backupExportLimit, async (_request, response, next) => {
+  app.get("/api/export/backup.zip", requireAuth, privateInstallOnly, backupExportLimit, async (_request, response, next) => {
     try {
       const workspace = await store.read();
       const prepared = await prepareBackup({ workspace, attachmentDirectory: store.attachmentDirectory, version, now: () => new Date(now()) });
@@ -336,7 +348,7 @@ export function createApp({
     }
   });
 
-  app.post("/api/import/preview", requireAuth, workspaceJson, async (request, response) => {
+  app.post("/api/import/preview", requireAuth, privateInstallOnly, workspaceJson, async (request, response) => {
     const expectedRevision = Number(request.body?.expectedRevision);
     const candidate = request.body?.workspace?.workspace ?? request.body?.workspace;
     try {
@@ -348,7 +360,7 @@ export function createApp({
     }
   });
 
-  app.post("/api/import", requireAuth, workspaceJson, async (request, response) => {
+  app.post("/api/import", requireAuth, privateInstallOnly, workspaceJson, async (request, response) => {
     const expectedRevision = Number(request.body?.expectedRevision);
     const candidate = request.body?.workspace?.workspace ?? request.body?.workspace;
     try { response.json(await store.replaceImported(candidate, expectedRevision, request.body?.confirmation)); }
@@ -359,7 +371,7 @@ export function createApp({
     }
   });
 
-  app.post("/api/import/backup", requireAuth, backupImportLimit, async (request, response) => {
+  app.post("/api/import/backup", requireAuth, privateInstallOnly, backupImportLimit, async (request, response) => {
     const temporary = path.join(store.dataDirectory, `.backup-upload-${crypto.randomUUID()}.zip`);
     try {
       if (!request.is("application/zip") && !request.is("application/octet-stream")) return response.status(415).json({ error: "Choose an AuDHDMAP ZIP backup." });
@@ -376,7 +388,7 @@ export function createApp({
     } finally { await unlink(temporary).catch(() => {}); }
   });
 
-  app.post("/api/attachments", requireAuth, attachmentWriteLimit, express.raw({ type: "application/octet-stream", limit: maxAttachmentBytes }), async (request, response) => {
+  app.post("/api/attachments", requireAuth, privateInstallOnly, attachmentWriteLimit, express.raw({ type: "application/octet-stream", limit: maxAttachmentBytes }), async (request, response) => {
     const attachmentBytes = request.body;
     if (!Buffer.isBuffer(attachmentBytes) || attachmentBytes.length === 0) return response.status(400).json({ error: "Choose a non-empty file." });
     const id = `attachment-${crypto.randomUUID()}`;
@@ -387,7 +399,7 @@ export function createApp({
     response.status(201).json({ id, name, mime, size: attachmentBytes.length, createdAt: new Date(now()).toISOString() });
   });
 
-  app.get("/api/attachments/:id", requireAuth, attachmentReadLimit, async (request, response) => {
+  app.get("/api/attachments/:id", requireAuth, privateInstallOnly, attachmentReadLimit, async (request, response) => {
     const workspace = await store.read();
     let attachment;
     for (const node of workspace.nodes) {
@@ -417,7 +429,7 @@ export function createApp({
     }
   });
 
-  app.delete("/api/attachments/:id", requireAuth, workspaceJson, async (request, response) => {
+  app.delete("/api/attachments/:id", requireAuth, privateInstallOnly, workspaceJson, async (request, response) => {
     if (!safeAttachmentId(request.params.id)) return response.status(400).json({ error: "Invalid attachment id." });
     const expectedRevision = Number(request.body?.expectedRevision);
     try {
@@ -429,7 +441,7 @@ export function createApp({
     }
   });
 
-  app.delete("/api/trash/:id", requireAuth, workspaceJson, async (request, response) => {
+  app.delete("/api/trash/:id", requireAuth, privateInstallOnly, workspaceJson, async (request, response) => {
     if (!safeRecordId(request.params.id)) return response.status(400).json({ error: "Invalid thought id." });
     const expectedRevision = Number(request.body?.expectedRevision);
     try {

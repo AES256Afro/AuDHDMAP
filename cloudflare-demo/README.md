@@ -1,6 +1,6 @@
 # Cloudflare demo deployment
 
-This package publishes the current AuDHDMAP Dockerfile through one Cloudflare Container and routes `audhdmap.com` to it. The demo keeps the normal owner login and supports every server export, including PDF.
+This package publishes the current AuDHDMAP Dockerfile through one Cloudflare Container and routes `audhdmap.com` to it. The root path serves the product website and `/demo` opens a passwordless shared sandbox with server-generated map exports, including PDF.
 
 The container's local `/data` is demo state, not a durable production backup. A container replacement or rollout can reset it to the checked-in seed workspace. Never place the only copy of real notes in this deployment.
 
@@ -10,11 +10,12 @@ The container's local `/data` is demo state, not a durable production backup. A 
 npm ci
 npm run check
 npm run deploy
-npx wrangler secret put AUDHDMAP_DEMO_PASSWORD
 npx wrangler secret put AUDHDMAP_SESSION_SECRET
 ```
 
-Use a session secret with at least 32 random characters. Secrets stay in Cloudflare and are passed to the container at start.
+Use a session secret with at least 32 random characters. The public mode does not issue login sessions, but the application keeps the secret validation as a fail-closed startup invariant. The secret stays in Cloudflare and is passed to the container at start.
+
+`AUDHDMAP_PUBLIC_DEMO=1` is set by the container wrapper. In this mode, map editing and map-level PDF, SVG, Markdown, text, CSV, and JSON exports are anonymous. Complete backup, restore, import, recovery-point, attachment, and permanent-delete routes return `403`.
 
 ## Promote a finished milestone
 
@@ -26,4 +27,4 @@ npm run check
 npm run deploy
 ```
 
-Verify `/api/health`, sign in, and download a PDF before treating the hosted demo as updated.
+Verify the product site, open `/demo` without a password, download a PDF, and confirm a private-only route returns `403` before treating the hosted demo as updated.

@@ -2,12 +2,15 @@
 
 ## Intended boundary
 
-AuDHDMAP 0.6.10 is a private, single-owner application. It is suitable for a trusted individual or household behind BoxPilot, a private network, a VPN, or a carefully configured HTTPS reverse proxy. It is not a multi-tenant collaboration service and does not implement per-map roles, public sharing, or anonymous write access.
+AuDHDMAP 0.7.0 is a private, single-owner application by default. It is suitable for a trusted individual or household behind BoxPilot, a private network, a VPN, or a carefully configured HTTPS reverse proxy. It is not a multi-tenant collaboration service and does not implement per-map roles or user isolation.
+
+The separate `AUDHDMAP_PUBLIC_DEMO=1` deployment mode is only for a disposable shared product sandbox. It intentionally permits anonymous workspace reads, edits, and map-level exports. It disables operations that can upload, restore, retain, or permanently erase shared data. This mode must never hold private or durable notes.
 
 ## Controls in this release
 
 - The container runs as the unprivileged `node` user, drops Linux capabilities in the supplied Compose file, and enables `no-new-privileges`.
-- Every workspace, export, import, backup, restore, and attachment route requires an authenticated owner session. Only the bounded health endpoint is public.
+- In the normal private mode, every workspace, export, import, backup, restore, and attachment route requires an authenticated owner session. Only bounded health and site-configuration endpoints are public.
+- Public-demo mode bypasses owner authentication only for the shared workspace and ordinary map exports. Complete backup, restore, import, recovery-point, attachment, and permanent-delete routes fail before request-body parsing or filesystem-heavy work.
 - Workspace, recovery, export, and attachment responses are marked no-store. Downloads additionally use a private cache policy so browsers and intermediaries cannot retain workspace or attachment content.
 - Session cookies are HTTP-only and SameSite Strict. They become Secure when HTTPS is reported by an explicitly trusted proxy.
 - Login credentials come from environment configuration and are compared with equal-length padded buffers through a timing-safe primitive. Failure state is bounded, stale entries are pruned, and repeated failures are temporarily throttled.
@@ -47,11 +50,11 @@ AuDHDMAP 0.6.10 is a private, single-owner application. It is suitable for a tru
 - Treat project CSV as private data too. Spreadsheet formula-leading cells are neutralized, but the export still contains the selected hierarchy, notes, tasks, references, URLs, and attachment names.
 - Treat `/data/snapshots` as private retained history. Permanent deletion from the current workspace does not erase existing recovery points, downloaded backups, or infrastructure snapshots.
 - Monitor `/data` free space. A filesystem without hard-link support uses copy fallback for recovery attachments, and a full volume can intentionally block destructive operations.
-- Treat `audhdmap.com` as an authentication-gated product demo, not a multi-user notebook or durable data store. Its login and session secret stay in Cloudflare Worker Secrets, while its container-local `/data` may reset during a rollout.
+- Treat `audhdmap.com/demo` as a public shared sandbox, not a multi-user notebook or durable data store. Enter no private information. Other visitors can see or replace its thoughts, and its container-local `/data` may reset during a rollout.
 
 ## Deliberate exclusions
 
-This release does not provide end-to-end encryption, client-side encrypted storage, password recovery, hardware-key login, session revocation across devices, audit logs, per-user authorization, public links, real-time collaboration, or cryptographic checksums inside server-local recovery points. Complete ZIP backups provide SHA-256 attachment integrity checks. Disk encryption, host security, TLS certificates, retention, and off-host backup protection remain infrastructure responsibilities.
+This release does not provide end-to-end encryption, client-side encrypted storage, password recovery, hardware-key login, session revocation across devices, audit logs, per-user authorization, public links, real-time collaboration, anonymous-user isolation, or cryptographic checksums inside server-local recovery points. Complete ZIP backups provide SHA-256 attachment integrity checks. Disk encryption, host security, TLS certificates, retention, and off-host backup protection remain infrastructure responsibilities.
 
 ## Reporting a vulnerability
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.0
+
+- Add a responsive CRT-inspired product website at `audhdmap.com` with real Canvas, Outline, and Export screenshots, feature guidance, self-hosting details, and direct demo links.
+- Add an explicit passwordless public-demo mode while keeping the normal owner login unchanged for BoxPilot and Docker installations.
+- Keep shared map editing and map-level PDF, SVG, Markdown, plain-text, project CSV, and JSON exports available in the public sandbox.
+- Disable complete backup, restore, import, recovery-point, attachment, and permanent-delete routes in public-demo mode, and remove those controls from its interface.
+- Label the hosted workspace as shared and temporary, document its boundary, and cover anonymous access, PDF output, private-operation denial, public controls, and product content with regressions.
+
 ## 0.6.10
 
 - Upgrade the production Alpine OpenSSL libraries to the current patched release during the container build.

@@ -37,6 +37,11 @@ export type ImportPreviewResult =
   | { status: "ready"; confirmation: string; preview: ImportPreview }
   | { status: "rejected"; error: string };
 
+export interface SiteConfig {
+  publicSite: boolean;
+  publicDemo: boolean;
+}
+
 async function parse<T>(response: Response): Promise<T> {
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body.error || `Request failed with status ${response.status}.`);
@@ -45,6 +50,10 @@ async function parse<T>(response: Response): Promise<T> {
 
 export async function session() {
   return parse<{ authenticated: boolean; username: string | null }>(await fetch("/api/session", { cache: "no-store" }));
+}
+
+export async function loadSiteConfig() {
+  return parse<SiteConfig>(await fetch("/api/config", { cache: "no-store" }));
 }
 
 export async function login(username: string, password: string) {

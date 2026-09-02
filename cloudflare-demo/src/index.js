@@ -6,9 +6,9 @@ export class AuDHDMapDemo extends Container {
   sleepAfter = "2h";
   envVars = {
     AUDHDMAP_ADMIN_USERNAME: "demo",
-    AUDHDMAP_ADMIN_PASSWORD: env.AUDHDMAP_DEMO_PASSWORD,
     AUDHDMAP_SESSION_SECRET: env.AUDHDMAP_SESSION_SECRET,
     AUDHDMAP_TRUST_PROXY: "1",
+    AUDHDMAP_PUBLIC_DEMO: "1",
   };
 }
 

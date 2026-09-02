@@ -84,6 +84,17 @@ Status: shipped
 - The production container upgrades patched OpenSSL libraries and excludes the unused npm CLI, with critical and high severity scanning against the exact release image.
 - API and interaction regression tests cover parser order, both body ceilings, malformed JSON and cookies, bounded health failures, Unicode filenames, fail-closed startup, focus containment, and focus restoration.
 
+## 0.7.0 - Public product site and safe shared demo
+
+Status: shipped
+
+- `audhdmap.com` presents a responsive product website with real Canvas, Outline, and Export screenshots, core features, sensory themes, self-hosting guidance, and a direct demo path.
+- `/demo` opens without a password only when the explicit public-demo environment flag is present. Normal BoxPilot and Docker installations retain their owner login and refuse to start without its configured password.
+- The shared sandbox keeps low-friction map editing and PDF, SVG, Markdown, plain-text, project CSV, and JSON exports.
+- Complete backup, restore, JSON import, recovery-point, attachment, and permanent-delete routes fail closed in public-demo mode, and their controls are absent from the public interface.
+- The interface labels public data as shared and temporary, links back to the product site, and explains where the complete private toolset is available.
+- API and interaction regression tests cover anonymous entry, editable state, PDF output, private-operation denial, public controls, screenshots, and self-hosting links.
+
 ## Later gates
 
 Collaboration, cloud synchronization, OCR, speech capture, and automated link retrieval remain outside the core until local recovery, export stability, and large-map performance are proven. These features must not weaken offline ownership or make a third-party account mandatory.

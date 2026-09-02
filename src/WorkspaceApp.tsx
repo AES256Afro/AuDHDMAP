@@ -17,6 +17,7 @@ import { BoardView, GanttView, OutlineView, TimelineView } from "./Views";
 interface Props {
   initialWorkspace: Workspace;
   username: string;
+  publicDemo?: boolean;
   onSignedOut: () => void;
 }
 
@@ -61,7 +62,7 @@ function useDialogFocus() {
   return { dialogRef, onDialogKeyDown };
 }
 
-export function WorkspaceApp({ initialWorkspace, username, onSignedOut }: Props) {
+export function WorkspaceApp({ initialWorkspace, username, publicDemo = false, onSignedOut }: Props) {
   const [workspace, setWorkspace] = useState(initialWorkspace);
   const [activeMapId, setActiveMapId] = useState(initialWorkspace.maps[0].id);
   const [view, setView] = useState<ViewMode>("canvas");
@@ -582,18 +583,19 @@ export function WorkspaceApp({ initialWorkspace, username, onSignedOut }: Props)
   return <div className="app-shell" style={{ filter: `brightness(${workspace.settings.brightness}%) saturate(${workspace.settings.saturation}%)` }}>
     <aside className="workspace-rail">
       <div className="brand"><span className="brand-network" aria-hidden="true">⌘</span><div><strong>AuDHDMAP</strong><small>{themeLabels[workspace.settings.theme]}</small></div></div>
+      {publicDemo && <div className="public-demo-badge"><span>●</span><strong>Public sandbox</strong><small>Shared and temporary</small></div>}
       <button className="new-thought" onClick={() => createThought(selected?.id ?? null)}><span>＋</span> New thought</button>
       <button className="quick-capture-button" onClick={() => setQuickCaptureOpen(true)}><span>≡</span> Quick capture <kbd>Q</kbd></button>
       <button className="quick-switcher-button" onClick={() => setQuickSwitcherOpen(true)}><span>⌘</span> Jump anywhere <kbd>⌘K</kbd></button>
       <label className="search-box"><span>⌕</span><input ref={searchRef} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search maps and notes" /></label>
       {search ? <div className="search-results"><span>{searchResults.length} results</span>{searchResults.map((node) => <button key={node.id} onClick={() => { navigateToNode(node.id); setSearch(""); }}><strong>{node.title}</strong><small>{mapById.get(node.mapId)?.title}</small></button>)}</div> : <nav className="map-list" aria-label="Maps"><div className="rail-heading"><span>Maps</span><button aria-label="Add map" onClick={addMap}>＋</button></div>{workspace.maps.map((map) => <button key={map.id} className={activeMapId === map.id ? "active" : ""} onClick={() => navigateToMap(map.id)}><span>⌂</span><span>{map.title}</span><small>{nodeCountByMap.get(map.id) ?? 0}</small></button>)}</nav>}
-      <div className="rail-bottom"><button onClick={() => setTrashOpen(true)}>♲ <span>Trash</span>{trashedNodes.length > 0 && <small>{trashedNodes.length}</small>}</button><button onClick={() => setSettingsOpen(true)}>⚙ <span>Visual settings</span></button><button onClick={() => setHelpOpen(true)}>? <span>Help and shortcuts</span></button><button onClick={signOut}>⇥ <span>Sign out {username}</span></button></div>
+      <div className="rail-bottom"><button onClick={() => setTrashOpen(true)}>♲ <span>Trash</span>{trashedNodes.length > 0 && <small>{trashedNodes.length}</small>}</button><button onClick={() => setSettingsOpen(true)}>⚙ <span>Visual settings</span></button><button onClick={() => setHelpOpen(true)}>? <span>Help and shortcuts</span></button>{publicDemo ? <a href="/">← <span>Back to website</span></a> : <button onClick={signOut}>⇥ <span>Sign out {username}</span></button>}</div>
     </aside>
 
     <main className="workspace-main">
       <header className="view-header">
         <nav aria-label="Workspace views">{(Object.keys(viewLabels) as ViewMode[]).map((id) => <button key={id} className={view === id ? "active" : ""} onClick={() => setView(id)}><span>{id === "canvas" ? "⌘" : id === "outline" ? "☷" : id === "board" ? "▦" : id === "timeline" ? "◷" : "▤"}</span>{viewLabels[id]}</button>)}</nav>
-        <div className="document-status"><button aria-label="Undo" onClick={undo}>↶</button><button aria-label="Redo" onClick={redo}>↷</button><span className={`save-state ${saveState}`} role="status" aria-live="polite" title={saveError}>{saveState === "saved" ? "✓ Saved" : saveState === "saving" ? "Saving..." : saveState === "failed" ? "Save failed" : "Unsaved"}</span>{saveState === "failed" && <button className="retry-save" title={saveError} onClick={enqueueSave}>Retry save</button>}<button onClick={openExport} title="Export and restore">⇩ Export</button><button onClick={() => importRef.current?.click()}>⇧ Import JSON</button><input ref={importRef} hidden type="file" accept="application/json,.json" onChange={handleImport} /></div>
+        <div className="document-status">{publicDemo && <span className="demo-status">PUBLIC DEMO</span>}<button aria-label="Undo" onClick={undo}>↶</button><button aria-label="Redo" onClick={redo}>↷</button><span className={`save-state ${saveState}`} role="status" aria-live="polite" title={saveError}>{saveState === "saved" ? "✓ Saved" : saveState === "saving" ? "Saving..." : saveState === "failed" ? "Save failed" : "Unsaved"}</span>{saveState === "failed" && <button className="retry-save" title={saveError} onClick={enqueueSave}>Retry save</button>}<button onClick={openExport} title={publicDemo ? "Export this map" : "Export and restore"}>⇩ Export</button>{!publicDemo && <><button onClick={() => importRef.current?.click()}>⇧ Import JSON</button><input ref={importRef} hidden type="file" accept="application/json,.json" onChange={handleImport} /></>}</div>
       </header>
       {focusId && <div className="focus-banner"><nav aria-label="Focused branch path"><span>{activeMap.title}</span>{focusPath.map((node, index) => <button key={node.id} aria-current={index === focusPath.length - 1 ? "location" : undefined} onClick={() => setFocusId(node.id)}>› {node.title}</button>)}</nav><button onClick={() => setFocusId(null)}>Exit focus</button></div>}
       {view === "canvas" && <div className="canvas-shell">
@@ -621,14 +623,14 @@ export function WorkspaceApp({ initialWorkspace, username, onSignedOut }: Props)
 
     {selectedGroup
       ? <BoundaryInspector group={selectedGroup} updateGroup={updateGroup} deleteGroup={deleteSelectedGroup} />
-      : <Inspector key={selected?.id ?? "empty"} workspace={workspace} selected={selected} updateNode={updateNode} deleteNode={deleteSelected} navigateToNode={navigateToNode} addReference={addReference} removeReference={removeReference} removeAttachment={removeNodeAttachment} />}
+      : <Inspector key={selected?.id ?? "empty"} workspace={workspace} selected={selected} publicDemo={publicDemo} updateNode={updateNode} deleteNode={deleteSelected} navigateToNode={navigateToNode} addReference={addReference} removeReference={removeReference} removeAttachment={removeNodeAttachment} />}
     {settingsOpen && <VisualSettings settings={workspace.settings} onChange={(patch) => mutate((current) => ({ ...current, settings: { ...current.settings, ...patch } }))} onClose={() => setSettingsOpen(false)} />}
     {helpOpen && <HelpDialog onClose={() => setHelpOpen(false)} />}
-    {exportOpen && <ExportDialog workspace={workspace} mapId={activeMap.id} focusId={focusId} restoring={restoring} onRestore={handleBackupRestore} onRestoreRecoveryPoint={handleRecoveryPointRestore} onClose={() => setExportOpen(false)} />}
+    {exportOpen && <ExportDialog workspace={workspace} mapId={activeMap.id} focusId={focusId} publicDemo={publicDemo} restoring={restoring} onRestore={handleBackupRestore} onRestoreRecoveryPoint={handleRecoveryPointRestore} onClose={() => setExportOpen(false)} />}
     {pendingImport && <ImportPreviewDialog pending={pendingImport} importing={importing} onConfirm={confirmImport} onClose={() => setPendingImport(null)} onChooseAnother={() => { setPendingImport(null); window.setTimeout(() => importRef.current?.click(), 0); }} />}
     {quickSwitcherOpen && <QuickSwitcher workspace={workspace} recentLocations={recentLocations} onThought={(id) => { navigateToNode(id); setQuickSwitcherOpen(false); }} onMap={(id) => { navigateToMap(id); setQuickSwitcherOpen(false); }} onClose={() => setQuickSwitcherOpen(false)} />}
     {quickCaptureOpen && <QuickCaptureDialog onCapture={quickCapture} onClose={() => setQuickCaptureOpen(false)} />}
-    {trashOpen && <TrashDialog nodes={trashedNodes} maps={workspace.maps} purgingId={purgingId} onRestore={restoreTrashed} onPurge={permanentlyDeleteTrashed} onClose={() => setTrashOpen(false)} />}
+    {trashOpen && <TrashDialog nodes={trashedNodes} maps={workspace.maps} publicDemo={publicDemo} purgingId={purgingId} onRestore={restoreTrashed} onPurge={permanentlyDeleteTrashed} onClose={() => setTrashOpen(false)} />}
     {toast && <div className="toast" role="status" onAnimationEnd={() => setToast("")}>{toast}</div>}
     <div className="crt-overlay" aria-hidden="true" />
   </div>;
@@ -742,9 +744,10 @@ function QuickCaptureDialog({ onCapture, onClose }: { onCapture: (titles: string
   </section></div>;
 }
 
-function TrashDialog({ nodes, maps, purgingId, onRestore, onPurge, onClose }: {
+function TrashDialog({ nodes, maps, publicDemo, purgingId, onRestore, onPurge, onClose }: {
   nodes: ThoughtNode[];
   maps: Workspace["maps"];
+  publicDemo: boolean;
   purgingId: string | null;
   onRestore: (id: string) => void;
   onPurge: (id: string) => Promise<void>;
@@ -757,18 +760,18 @@ function TrashDialog({ nodes, maps, purgingId, onRestore, onPurge, onClose }: {
   const ordered = [...nodes].sort((left, right) => (right.trashedAt ?? "").localeCompare(left.trashedAt ?? ""));
   const visible = ordered.slice(0, visibleCount);
   useEffect(() => { if (confirmId && !nodes.some((node) => node.id === confirmId)) setConfirmId(null); }, [confirmId, nodes]);
-  return <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && !purgingId && onClose()}><section ref={dialogRef} onKeyDown={onDialogKeyDown} className="trash-dialog" role="dialog" aria-modal="true" aria-labelledby="trash-title">
+  return <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && !purgingId && onClose()}><section ref={dialogRef} onKeyDown={onDialogKeyDown} className={`trash-dialog ${publicDemo ? "public-demo-trash" : ""}`} role="dialog" aria-modal="true" aria-labelledby="trash-title">
     <header><div><span className="eyebrow">Recoverable by default</span><h2 id="trash-title">Trash</h2></div><button autoFocus aria-label="Close trash" disabled={Boolean(purgingId)} onClick={onClose}>×</button></header>
-    <p>Trashed thoughts stay out of maps, search, projects, and ordinary exports. Complete ZIP backups still include them and their attachments.</p>
+    <p>{publicDemo ? "Trashed thoughts stay out of maps, search, projects, and exports. You can restore them while this shared sandbox is available." : "Trashed thoughts stay out of maps, search, projects, and ordinary exports. Complete ZIP backups still include them and their attachments."}</p>
     {ordered.length === 0 ? <div className="trash-empty"><span>♲</span><strong>Trash is empty</strong><small>Deleting a thought moves it here first.</small></div> : <><div className="trash-list">{visible.map((node) => <article key={node.id}>
       <div><strong>{node.title}</strong><small>{mapById.get(node.mapId)?.title ?? "Unknown map"} · {node.attachments.length} attachment{node.attachments.length === 1 ? "" : "s"}</small></div>
       <button disabled={Boolean(purgingId)} onClick={() => { setConfirmId(null); onRestore(node.id); }}>Restore</button>
-      <button className={confirmId === node.id ? "confirm-purge" : ""} disabled={Boolean(purgingId)} onClick={() => {
+      {!publicDemo && <button className={confirmId === node.id ? "confirm-purge" : ""} disabled={Boolean(purgingId)} onClick={() => {
         if (confirmId !== node.id) { setConfirmId(node.id); return; }
         void onPurge(node.id);
-      }}>{purgingId === node.id ? "Deleting..." : confirmId === node.id ? "Confirm permanent delete" : "Delete permanently"}</button>
+      }}>{purgingId === node.id ? "Deleting..." : confirmId === node.id ? "Confirm permanent delete" : "Delete permanently"}</button>}
     </article>)}</div>{ordered.length > TRASH_PAGE_SIZE && <div className="trash-progress"><span>Showing {visible.length.toLocaleString()} of {ordered.length.toLocaleString()}</span>{visible.length < ordered.length && <button onClick={() => setVisibleCount((current) => Math.min(ordered.length, current + TRASH_PAGE_SIZE))}>Show {Math.min(TRASH_PAGE_SIZE, ordered.length - visible.length)} more</button>}</div>}</>}
-    {confirmId && !purgingId && <p className="purge-warning">This removes the thought and its attachment bytes from the current workspace. Existing ZIP backups and server recovery points may still retain copies.</p>}
+    {!publicDemo && confirmId && !purgingId && <p className="purge-warning">This removes the thought and its attachment bytes from the current workspace. Existing ZIP backups and server recovery points may still retain copies.</p>}
   </section></div>;
 }
 
@@ -814,10 +817,11 @@ function ImportPreviewDialog({ pending, importing, onConfirm, onClose, onChooseA
   </section></div>;
 }
 
-function ExportDialog({ workspace, mapId, focusId, restoring, onRestore, onRestoreRecoveryPoint, onClose }: {
+function ExportDialog({ workspace, mapId, focusId, publicDemo, restoring, onRestore, onRestoreRecoveryPoint, onClose }: {
   workspace: Workspace;
   mapId: string;
   focusId: string | null;
+  publicDemo: boolean;
   restoring: boolean;
   onRestore: (file: File) => Promise<void>;
   onRestoreRecoveryPoint: (id: string) => Promise<void>;
@@ -827,7 +831,7 @@ function ExportDialog({ workspace, mapId, focusId, restoring, onRestore, onResto
   const [backup, setBackup] = useState<File | null>(null);
   const [recoveryPoints, setRecoveryPoints] = useState<RecoveryPointList | null>(null);
   const [recoveryError, setRecoveryError] = useState("");
-  const [recoveryBusy, setRecoveryBusy] = useState<"" | "loading" | "creating" | `restore:${string}`>("loading");
+  const [recoveryBusy, setRecoveryBusy] = useState<"" | "loading" | "creating" | `restore:${string}`>(publicDemo ? "" : "loading");
   const [confirmRecoveryId, setConfirmRecoveryId] = useState<string | null>(null);
   const map = workspace.maps.find((entry) => entry.id === mapId)!;
   const focus = focusId ? workspace.nodes.find((node) => node.id === focusId && isActiveThought(node)) : null;
@@ -844,7 +848,7 @@ function ExportDialog({ workspace, mapId, focusId, restoring, onRestore, onResto
     finally { setRecoveryBusy(""); }
   }
 
-  useEffect(() => { void refreshRecoveryPoints(); }, []);
+  useEffect(() => { if (!publicDemo) void refreshRecoveryPoints(); }, [publicDemo]);
 
   async function makeRecoveryPoint() {
     setRecoveryBusy("creating"); setRecoveryError("");
@@ -869,7 +873,7 @@ function ExportDialog({ workspace, mapId, focusId, restoring, onRestore, onResto
         <a href={mapExportUrl("csv", mapId, focusId)} download><strong>Project CSV</strong><span>Hierarchy, tasks, and references</span></a>
       </div>
     </section>
-    <section className="export-section"><div className="export-heading"><div><h3>Back up everything</h3><p>The ZIP contains workspace data, every attachment, and SHA-256 integrity checks.</p></div><span>FULL</span></div>
+    {!publicDemo && <><section className="export-section"><div className="export-heading"><div><h3>Back up everything</h3><p>The ZIP contains workspace data, every attachment, and SHA-256 integrity checks.</p></div><span>FULL</span></div>
       <div className="backup-actions"><a className="primary-button" href="/api/export/backup.zip" download>⇩ Complete ZIP backup</a><a href="/api/export" download>JSON data only</a></div>
     </section>
     <section className="export-section recovery-section"><div className="export-heading"><div><h3>Server recovery points</h3><p>AuDHDMAP keeps up to 10 local points before periodic saves and destructive operations. They stay on this server and are not inside downloaded backups.</p></div><span>LOCAL</span></div>
@@ -889,13 +893,15 @@ function ExportDialog({ workspace, mapId, focusId, restoring, onRestore, onResto
     <section className="export-section restore-section"><div className="export-heading"><div><h3>Restore a complete backup</h3><p>The archive is validated in a staging area before the current workspace changes.</p></div><span>SAFE</span></div>
       <label className="backup-picker"><input type="file" accept="application/zip,.zip" disabled={busy} onChange={(event) => setBackup(event.target.files?.[0] ?? null)} /><span>{backup ? backup.name : "Choose an AuDHDMAP ZIP backup"}</span></label>
       {backup && <div className="restore-confirm"><p>This replaces the current workspace and attachments. AuDHDMAP creates a server recovery point for the current state first.</p><button className="danger-button" disabled={busy} onClick={() => onRestore(backup)}>{restoring ? "Validating and restoring..." : "Replace workspace from this backup"}</button></div>}
-    </section>
+    </section></>}
+    {publicDemo && <section className="export-section demo-export-note"><div className="export-heading"><div><h3>Shared sandbox limits</h3><p>Complete backup, restore, import, recovery-point, attachment, and permanent-delete tools are available in private BoxPilot and Docker installations. They are disabled here to keep this anonymous demo safe.</p></div><span>DEMO</span></div><a href="https://github.com/AES256Afro/AuDHDMAP#run-with-docker-compose">See the private installation guide ↗</a></section>}
   </section></div>;
 }
 
-function Inspector({ workspace, selected, updateNode, deleteNode, navigateToNode, addReference, removeReference, removeAttachment }: {
+function Inspector({ workspace, selected, publicDemo, updateNode, deleteNode, navigateToNode, addReference, removeReference, removeAttachment }: {
   workspace: Workspace;
   selected: ThoughtNode | null;
+  publicDemo: boolean;
   updateNode: (id: string, patch: Partial<ThoughtNode>) => void;
   deleteNode: () => void;
   navigateToNode: (id: string) => void;
@@ -962,9 +968,9 @@ function Inspector({ workspace, selected, updateNode, deleteNode, navigateToNode
       {references.map((edge) => { const relatedId = edge.source === thought.id ? edge.target : edge.source; const related = workspace.nodes.find((node) => node.id === relatedId); const map = workspace.maps.find((item) => item.id === related?.mapId); return <div className="reference-card" key={edge.id}><button onClick={() => related && navigateToNode(related.id)}><strong>{related?.title ?? "Missing thought"}</strong><small>{edge.label || "related"} · {map?.title}</small></button><button aria-label={`Remove link to ${related?.title}`} onClick={() => removeReference(edge.id)}>×</button></div>; })}
       <div className="reference-builder"><select aria-label="Thought to link" value={referenceTarget} onChange={(event) => setReferenceTarget(event.target.value)}><option value="">Choose any thought...</option>{workspace.maps.map((map) => <optgroup key={map.id} label={map.title}>{workspace.nodes.filter((node) => node.mapId === map.id && node.id !== thought.id && isActiveThought(node)).map((node) => <option key={node.id} value={node.id}>{node.title}</option>)}</optgroup>)}</select><input aria-label="Reference label" value={referenceLabel} onChange={(event) => setReferenceLabel(event.target.value)} placeholder="related" /><button disabled={!referenceTarget} onClick={() => { if (referenceTarget) { addReference(thought.id, referenceTarget, referenceLabel); setReferenceTarget(""); } }}>＋ Link thoughts</button></div>
     </section>
-    <section className="inspector-section attachments"><div className="section-heading"><h3>Media</h3><button disabled={uploading} onClick={() => inputRef.current?.click()}>{uploading ? "Uploading..." : "＋ File"}</button><input ref={inputRef} hidden multiple type="file" onChange={files} /></div>
-      <div className="attachment-drop" role="button" tabIndex={0} onClick={() => inputRef.current?.click()} onKeyDown={(event) => (event.key === "Enter" || event.key === " ") && inputRef.current?.click()} onDragOver={(event) => event.preventDefault()} onDrop={drop}>Drop files or a web link here</div>
-      {selected.attachments.map((attachment) => <div className="attachment-card" key={attachment.id}>{isPreviewableImage(attachment.mime) ? <img src={`/api/attachments/${attachment.id}`} alt="" /> : <span>{attachment.mime === "application/pdf" ? "PDF" : "FILE"}</span>}<a href={`/api/attachments/${attachment.id}`} target="_blank" rel="noreferrer"><strong>{attachment.name}</strong><small>{formatBytes(attachment.size)}</small></a><button aria-label={`Remove ${attachment.name}`} onClick={() => removeAttachment(thought.id, attachment.id)}>×</button></div>)}
+    <section className="inspector-section attachments"><div className="section-heading"><h3>Media</h3>{publicDemo ? <span className="demo-limit-label">LINKS ONLY IN DEMO</span> : <><button disabled={uploading} onClick={() => inputRef.current?.click()}>{uploading ? "Uploading..." : "＋ File"}</button><input ref={inputRef} hidden multiple type="file" onChange={files} /></>}</div>
+      {!publicDemo && <><div className="attachment-drop" role="button" tabIndex={0} onClick={() => inputRef.current?.click()} onKeyDown={(event) => (event.key === "Enter" || event.key === " ") && inputRef.current?.click()} onDragOver={(event) => event.preventDefault()} onDrop={drop}>Drop files or a web link here</div>
+      {selected.attachments.map((attachment) => <div className="attachment-card" key={attachment.id}>{isPreviewableImage(attachment.mime) ? <img src={`/api/attachments/${attachment.id}`} alt="" /> : <span>{attachment.mime === "application/pdf" ? "PDF" : "FILE"}</span>}<a href={`/api/attachments/${attachment.id}`} target="_blank" rel="noreferrer"><strong>{attachment.name}</strong><small>{formatBytes(attachment.size)}</small></a><button aria-label={`Remove ${attachment.name}`} onClick={() => removeAttachment(thought.id, attachment.id)}>×</button></div>)}</>}
       {selected.links.map((link) => <div className="web-link-card" key={link.id}><span>↗</span><a href={link.url} target="_blank" rel="noreferrer"><strong>{link.title}</strong><small>{new URL(link.url).hostname}</small></a><button aria-label={`Remove ${link.title}`} onClick={() => updateNode(thought.id, { links: thought.links.filter((item) => item.id !== link.id) })}>×</button></div>)}
       <div className="link-builder"><input type="url" value={linkUrl} onChange={(event) => setLinkUrl(event.target.value)} placeholder="https://example.com" /><button disabled={!linkUrl.trim()} onClick={() => addWebLink(linkUrl)}>＋ Link</button></div>
     </section>

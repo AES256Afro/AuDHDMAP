@@ -1,13 +1,15 @@
 import { FormEvent, lazy, Suspense, useEffect, useState } from "react";
-import { loadWorkspace, login, session } from "./api";
+import { loadSiteConfig, loadWorkspace, login, session } from "./api";
 import type { Workspace } from "./model";
+import { LandingPage } from "./LandingPage";
 
 const WorkspaceApp = lazy(() => import("./WorkspaceApp").then((module) => ({ default: module.WorkspaceApp })));
 
 type RootState =
   | { kind: "loading" }
+  | { kind: "landing" }
   | { kind: "login"; error?: string }
-  | { kind: "ready"; workspace: Workspace; username: string }
+  | { kind: "ready"; workspace: Workspace; username: string; publicDemo: boolean }
   | { kind: "error"; message: string };
 
 export function Root() {
@@ -15,19 +17,24 @@ export function Root() {
 
   useEffect(() => {
     let active = true;
-    session().then(async (current) => {
+    loadSiteConfig().then(async (config) => {
+      if (!active) return;
+      const path = location.pathname.replace(/\/+$/, "") || "/";
+      if (config.publicSite && path === "/") return setState({ kind: "landing" });
+      const current = await session();
       if (!active) return;
       if (!current.authenticated || !current.username) return setState({ kind: "login" });
       const workspace = await loadWorkspace();
-      if (active) setState({ kind: "ready", workspace, username: current.username! });
+      if (active) setState({ kind: "ready", workspace, username: current.username!, publicDemo: config.publicDemo });
     }).catch((error) => active && setState({ kind: "error", message: error.message }));
     return () => { active = false; };
   }, []);
 
   if (state.kind === "loading") return <div className="boot-screen"><div className="boot-mark">AuDHDMAP</div><span>Opening your workspace...</span></div>;
+  if (state.kind === "landing") return <LandingPage />;
   if (state.kind === "error") return <div className="boot-screen error-screen"><div className="boot-mark">AuDHDMAP</div><strong>Could not open the workspace</strong><p>{state.message}</p><button onClick={() => location.reload()}>Try again</button></div>;
-  if (state.kind === "login") return <LoginScreen initialError={state.error} onReady={(workspace, username) => setState({ kind: "ready", workspace, username })} />;
-  return <Suspense fallback={<div className="boot-screen"><div className="boot-mark">AuDHDMAP</div><span>Preparing the visual workspace...</span></div>}><WorkspaceApp initialWorkspace={state.workspace} username={state.username} onSignedOut={() => setState({ kind: "login" })} /></Suspense>;
+  if (state.kind === "login") return <LoginScreen initialError={state.error} onReady={(workspace, username) => setState({ kind: "ready", workspace, username, publicDemo: false })} />;
+  return <Suspense fallback={<div className="boot-screen"><div className="boot-mark">AuDHDMAP</div><span>Preparing the visual workspace...</span></div>}><WorkspaceApp initialWorkspace={state.workspace} username={state.username} publicDemo={state.publicDemo} onSignedOut={() => setState({ kind: "login" })} /></Suspense>;
 }
 
 function LoginScreen({ initialError, onReady }: { initialError?: string; onReady: (workspace: Workspace, username: string) => void }) {

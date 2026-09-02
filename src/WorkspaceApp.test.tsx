@@ -107,6 +107,25 @@ describe("workspace daily-use safeguards", () => {
     expect((api.saveWorkspace.mock.calls[0][0] as Workspace).nodes[0].title).toBe("Saved before export");
   });
 
+  it("presents a constrained shared sandbox without private recovery controls", async () => {
+    const rendered = render(<WorkspaceApp initialWorkspace={fixture()} username="demo" publicDemo onSignedOut={() => {}} />);
+    expect(screen.getByText("Public sandbox")).not.toBeNull();
+    expect(screen.getByText("PUBLIC DEMO")).not.toBeNull();
+    expect(screen.getByRole("link", { name: /Back to website/ }).getAttribute("href")).toBe("/");
+    expect(screen.queryByRole("button", { name: /Sign out/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Import JSON/ })).toBeNull();
+    expect(rendered.container.querySelector('input[type="file"]')).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /Export/ }));
+    const dialog = await screen.findByRole("dialog", { name: "Export and recovery" });
+    expect(within(dialog).getByRole("link", { name: /PDF/ })).not.toBeNull();
+    expect(within(dialog).getByText("Shared sandbox limits")).not.toBeNull();
+    expect(within(dialog).queryByText("Back up everything")).toBeNull();
+    expect(within(dialog).queryByText("Server recovery points")).toBeNull();
+    expect(within(dialog).queryByText("Restore a complete backup")).toBeNull();
+    expect(api.listRecoveryPoints).not.toHaveBeenCalled();
+  });
+
   it("asks oversized maps to focus a branch before creating a PDF", async () => {
     const workspace = fixture();
     const template = workspace.nodes[0];

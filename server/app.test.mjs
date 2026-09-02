@@ -13,12 +13,12 @@ afterEach(async () => {
   }));
 });
 
-async function setup({ trustProxy = false, maxBackupBytes, readinessError = null, requestLimits } = {}) {
+async function setup({ trustProxy = false, maxBackupBytes, readinessError = null, requestLimits, publicDemo = false, adminPassword = "correct horse" } = {}) {
   const directory = await mkdtemp(path.join(os.tmpdir(), "audhdmap-api-"));
   const store = createWorkspaceStore({ dataDirectory: directory, now: () => new Date("2026-09-01T12:00:00.000Z") });
   await store.initialize();
   if (readinessError) store.readiness = async () => { throw readinessError; };
-  const app = createApp({ store, adminUsername: "owner", adminPassword: "correct horse", sessionSecret: "test-session-secret-is-long-enough", trustProxy, maxBackupBytes, requestLimits, now: () => Date.parse("2026-09-01T12:00:00.000Z"), distDirectory: path.join(directory, "missing-dist") });
+  const app = createApp({ store, adminUsername: "owner", adminPassword, sessionSecret: "test-session-secret-is-long-enough", trustProxy, maxBackupBytes, requestLimits, publicDemo, now: () => Date.parse("2026-09-01T12:00:00.000Z"), distDirectory: path.join(directory, "missing-dist") });
   const server = await new Promise((resolve) => { const listening = app.listen(0, "127.0.0.1", () => resolve(listening)); });
   resources.push({ server, directory });
   const address = server.address();
@@ -33,6 +33,9 @@ async function signIn(base, password = "correct horse") {
 describe("AuDHDMAP API", () => {
   it("exposes bounded readiness without exposing the workspace", async () => {
     const { base } = await setup();
+    const config = await fetch(`${base}/api/config`);
+    expect(config.headers.get("cache-control")).toBe("no-store");
+    expect(await config.json()).toEqual({ publicSite: false, publicDemo: false });
     const health = await fetch(`${base}/api/health`);
     expect(health.status).toBe(200);
     expect(health.headers.get("content-security-policy")).toContain("form-action 'self'");
@@ -41,6 +44,49 @@ describe("AuDHDMAP API", () => {
     expect(await health.json()).toMatchObject({ ok: true, storage: "ready", revision: 0, maps: 2 });
     expect((await fetch(`${base}/api/workspace`)).status).toBe(401);
     expect((await fetch(`${base}/api/health`, { headers: { "x-forwarded-proto": "https" } })).headers.get("strict-transport-security")).toBeNull();
+  });
+
+  it("opens the shared demo without a password while blocking private-install operations", async () => {
+    const { base } = await setup({ publicDemo: true, adminPassword: "" });
+    const config = await fetch(`${base}/api/config`);
+    expect(await config.json()).toEqual({ publicSite: true, publicDemo: true });
+
+    const currentSession = await fetch(`${base}/api/session`);
+    expect(await currentSession.json()).toEqual({ authenticated: true, username: "demo" });
+    const login = await fetch(`${base}/api/auth/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-audhdmap-request": "1" },
+      body: JSON.stringify({ username: "demo", password: "unused" }),
+    });
+    expect(login.status).toBe(404);
+    expect(await login.json()).toEqual({ error: "The public demo does not require a password." });
+
+    const workspace = await (await fetch(`${base}/api/workspace`)).json();
+    workspace.maps[0].title = "Edited in the public sandbox";
+    const saved = await fetch(`${base}/api/workspace`, {
+      method: "PUT",
+      headers: { "content-type": "application/json", "x-audhdmap-request": "1" },
+      body: JSON.stringify({ workspace, expectedRevision: 0 }),
+    });
+    expect(saved.status).toBe(200);
+    expect((await saved.json()).revision).toBe(1);
+
+    const pdf = await fetch(`${base}/api/export/map.pdf?mapId=map-home-server`);
+    expect(pdf.status).toBe(200);
+    expect(pdf.headers.get("content-type")).toBe("application/pdf");
+    expect(Buffer.from(await pdf.arrayBuffer()).subarray(0, 4).toString()).toBe("%PDF");
+
+    const blocked = [
+      await fetch(`${base}/api/snapshots`),
+      await fetch(`${base}/api/export/backup.zip`),
+      await fetch(`${base}/api/attachments/not-public`),
+      await fetch(`${base}/api/import/preview`, { method: "POST", headers: { "content-type": "application/json", "x-audhdmap-request": "1" }, body: "{" }),
+      await fetch(`${base}/api/trash/node-root`, { method: "DELETE", headers: { "x-audhdmap-request": "1" } }),
+    ];
+    for (const response of blocked) {
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({ error: "This operation is disabled in the shared public demo." });
+    }
   });
 
   it("does not disclose storage failure details through public health", async () => {
