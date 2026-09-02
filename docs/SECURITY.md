@@ -44,6 +44,7 @@ AuDHDMAP 0.6.6 is a private, single-owner application. It is suitable for a trus
 - Treat project CSV as private data too. Spreadsheet formula-leading cells are neutralized, but the export still contains the selected hierarchy, notes, tasks, references, URLs, and attachment names.
 - Treat `/data/snapshots` as private retained history. Permanent deletion from the current workspace does not erase existing recovery points, downloaded backups, or infrastructure snapshots.
 - Monitor `/data` free space. A filesystem without hard-link support uses copy fallback for recovery attachments, and a full volume can intentionally block destructive operations.
+- Treat `audhdmap.com` as an authentication-gated product demo, not a multi-user notebook or durable data store. Its login and session secret stay in Cloudflare Worker Secrets, while its container-local `/data` may reset during a rollout.
 
 ## Deliberate exclusions
 

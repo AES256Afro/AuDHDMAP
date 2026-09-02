@@ -125,6 +125,23 @@ docker compose ps
 
 Avoid relying on the moving `edge` tag for a controlled installation. Use the catalog's versioned image.
 
+## Promote the hosted demo
+
+The Cloudflare deployment package under `cloudflare-demo` builds the repository Dockerfile, routes `audhdmap.com` to one named container, and retains the normal owner login and server export paths. PDF export therefore exercises the same renderer as a BoxPilot installation.
+
+Promote only after the milestone commit, version tag, automated tests, and public multi-platform image have passed:
+
+```sh
+cd cloudflare-demo
+npm ci
+npm run check
+npm run deploy
+```
+
+On the first deployment, store `AUDHDMAP_DEMO_PASSWORD` and a random `AUDHDMAP_SESSION_SECRET` with `wrangler secret put`. Do not place either value in source. After every promotion, verify `/api/health`, sign in, open Export, download the current map as PDF, and inspect the returned file before calling the hosted demo current.
+
+The demo's container-local `/data` is not a production backup target. A replacement or rollout can return it to the seed workspace. Keep real work in a durable BoxPilot or Docker deployment.
+
 ## Limits in 0.6.6
 
 - 200 maps

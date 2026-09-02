@@ -53,6 +53,12 @@ If exactly one trusted reverse proxy terminates HTTPS in front of AuDHDMAP, set 
 
 See [Operations and recovery](docs/OPERATIONS.md) for backup drills, restore behavior, upgrades, limits, and troubleshooting. The security boundary is documented in [Security](docs/SECURITY.md).
 
+## Hosted demo
+
+The milestone demo is published at [audhdmap.com](https://audhdmap.com). It runs the same Docker application through one Cloudflare Container, including server-generated PDF export. The login is managed as a Cloudflare secret and is not committed to this repository.
+
+Treat the hosted workspace as temporary demonstration data. Its container-local `/data` can reset during a replacement or rollout. Install through BoxPilot or Docker for durable private notes.
+
 ## Run for development
 
 Requires Node.js 24 or newer.

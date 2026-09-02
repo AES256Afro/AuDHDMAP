@@ -22,6 +22,10 @@ jobs:
       - run: npm ci
       - run: npm run check
       - run: npm audit --omit=dev
+      - run: npm ci
+        working-directory: cloudflare-demo
+      - run: npm run check
+        working-directory: cloudflare-demo
 
   container:
     needs: check

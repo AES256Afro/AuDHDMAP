@@ -1,0 +1,36 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "audhdmap-demo",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "routes": [
+    {
+      "pattern": "audhdmap.com",
+      "custom_domain": true
+    }
+  ],
+  "containers": [
+    {
+      "class_name": "AuDHDMapDemo",
+      "image": "../Dockerfile",
+      "max_instances": 1,
+      "instance_type": "lite"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "AUDHDMAP_DEMO",
+        "class_name": "AuDHDMapDemo"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["AuDHDMapDemo"]
+    }
+  ]
+}
