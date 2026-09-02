@@ -185,6 +185,7 @@ describe("AuDHDMAP API", () => {
     expect((await fetch(`${base}/api/workspace`, { method: "PUT", headers: { cookie, "content-type": "application/json", "x-audhdmap-request": "1" }, body: JSON.stringify({ workspace, expectedRevision: 0 }) })).status).toBe(200);
     const downloaded = await fetch(`${base}/api/attachments/${attachment.id}`, { headers: { cookie } });
     expect(downloaded.status).toBe(200);
+    expect(downloaded.headers.get("cache-control")).toBe("private, no-store");
     expect(downloaded.headers.get("content-disposition")).toContain("filename*=UTF-8''R%C3%A9sum%C3%A9%20%F0%9F%A7%A0.txt");
     expect(await downloaded.text()).toBe("hello");
   });

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.6
+
+- Mark authenticated attachment downloads `private, no-store`, preventing browser or intermediary cache retention of private inline images and downloaded file bytes.
+- Add attachment-response cache-policy regression coverage.
+
 ## 0.6.5
 
 - Mark the authenticated data-only JSON export `private, no-store`, matching every other workspace and export response so shared caches cannot retain private workspace content.

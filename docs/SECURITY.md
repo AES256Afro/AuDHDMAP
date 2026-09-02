@@ -2,13 +2,13 @@
 
 ## Intended boundary
 
-AuDHDMAP 0.6.5 is a private, single-owner application. It is suitable for a trusted individual or household behind BoxPilot, a private network, a VPN, or a carefully configured HTTPS reverse proxy. It is not a multi-tenant collaboration service and does not implement per-map roles, public sharing, or anonymous write access.
+AuDHDMAP 0.6.6 is a private, single-owner application. It is suitable for a trusted individual or household behind BoxPilot, a private network, a VPN, or a carefully configured HTTPS reverse proxy. It is not a multi-tenant collaboration service and does not implement per-map roles, public sharing, or anonymous write access.
 
 ## Controls in this release
 
 - The container runs as the unprivileged `node` user, drops Linux capabilities in the supplied Compose file, and enables `no-new-privileges`.
 - Every workspace, export, import, backup, restore, and attachment route requires an authenticated owner session. Only the bounded health endpoint is public.
-- Workspace, recovery, and export responses are marked no-store. Download exports additionally use a private cache policy so intermediaries cannot retain workspace content.
+- Workspace, recovery, export, and attachment responses are marked no-store. Downloads additionally use a private cache policy so browsers and intermediaries cannot retain workspace or attachment content.
 - Session cookies are HTTP-only and SameSite Strict. They become Secure when HTTPS is reported by an explicitly trusted proxy.
 - Login comparisons use fixed-length hashes with a timing-safe comparison. Failure state is bounded, stale entries are pruned, and repeated failures are temporarily throttled.
 - Malformed percent-encoded cookies fail closed as anonymous sessions instead of reaching the general error path.

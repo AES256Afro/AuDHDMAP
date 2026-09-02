@@ -374,6 +374,7 @@ export function createApp({
       const info = await stat(filePath);
       const inlineImages = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"]);
       const previewable = inlineImages.has(attachment.mime);
+      response.setHeader("Cache-Control", "private, no-store");
       response.setHeader("Content-Type", previewable ? attachment.mime : "application/octet-stream");
       response.setHeader("Content-Length", String(info.size));
       response.setHeader("Content-Disposition", contentDisposition(attachment.name, previewable ? "inline" : "attachment"));
